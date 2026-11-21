@@ -13,7 +13,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 |---|---------|-------|--------|
 | 1 | Stack & architecture | Foundation | done |
 | 2 | Coding standards & tooling | Foundation | in-progress |
-| 3 | Data model | Foundation | planned |
+| 3 | Data model | Foundation | in-progress |
 | 4 | Design system & console UI foundation | Foundation | planned |
 | 5 | Core autonomous engineer and reviewer loop | Slice 1 | planned |
 | 6 | Full repository context code reviewer | Slice 2 | planned |
@@ -41,10 +41,20 @@ Capture conventions, then install lint, format, typecheck, and test runner tooli
 - [x] Install the tooling: `/develop tooling`
 - [x] Check it runs clean: `/test`
 
-### 3. Data model · needs a decision
+### 3. Data model
 Core database schema for tenant organizations, repositories, agent tasks, sandbox runs, audit logs, and encrypted credentials.
 **Done when:** entities and migrations support task execution, tenant isolation, and audit events without breaking changes.
-- [ ] Design it (spec): `/architect data model`
+spec [0002](../specs/0002-data-model/index.md) · code in `apps/agent/app/infrastructure/db/`, `apps/web/src/db/`
+- [x] Design it (spec): `/architect data model`
+- [x] Build it: /develop data model
+  - [x] UUIDv7 base models, AES 256 GCM security utility, and SQLAlchemy declarative models (AC-1, AC-5)
+  - [x] Alembic migration with partial unique indexes and audit immutability trigger (AC-1, AC-6, AC-7, AC-8)
+  - [x] Domain repository protocols and async SQLAlchemy repository implementations (AC-2, AC-3, AC-6, AC-7)
+  - [x] Drizzle ORM read schemas in web console and integration test suite (AC-1, AC-2, AC-8)
+- [x] Verify it: /check verify data model
+- [x] Test it: /test data model
+- [x] Review it (fresh model): /check review data model
+- [x] Document it: /document data model
 
 ### 4. Design system & console UI foundation · needs a decision
 Visual design tokens, layout primitives, and reusable UI components for the web console so developers can inspect tasks and configure settings.

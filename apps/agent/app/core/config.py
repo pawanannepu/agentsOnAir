@@ -16,5 +16,12 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3000",
     ]
 
+    DATABASE_URL: str = "postgresql+asyncpg://localhost:5432/agentsonair"
+    # Default 32-byte key base64-encoded for development/testing
+    CREDENTIALS_ENCRYPTION_KEY: str = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+    DATABASE_URL: str = "postgresql+asyncpg://localhost:5432/agentsonair"
+    # Default 32-byte key base64-encoded for development/testing
+    CREDENTIALS_ENCRYPTION_KEY: str = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+
 
 settings = Settings()
