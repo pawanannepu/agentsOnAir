@@ -1,0 +1,10 @@
+node_modules
+.next
+.turbo
+dist
+.venv
+.husky/_
+pnpm-lock.yaml
+uv.lock
+tsconfig.tsbuildinfo
+public

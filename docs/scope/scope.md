@@ -11,8 +11,8 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 
 | # | Feature | Phase | Status |
 |---|---------|-------|--------|
-| 1 | Stack & architecture | Foundation | in-progress |
-| 2 | Coding standards & tooling | Foundation | planned |
+| 1 | Stack & architecture | Foundation | done |
+| 2 | Coding standards & tooling | Foundation | in-progress |
 | 3 | Data model | Foundation | planned |
 | 4 | Design system & console UI foundation | Foundation | planned |
 | 5 | Core autonomous engineer and reviewer loop | Slice 1 | planned |
@@ -37,9 +37,9 @@ spec [0001](../specs/0001-stack-and-architecture/index.md) · code in `apps/`
 ### 2. Coding standards & tooling
 Capture conventions, then install lint, format, typecheck, and test runner tooling from the real scaffolded project.
 **Done when:** root `AGENTS.md` reflects conventions, and lint, format, typecheck, and test commands run clean.
-- [ ] Capture conventions and tooling choices: `/audit`
-- [ ] Install the tooling: `/develop tooling`
-- [ ] Check it runs clean: `/test`
+- [x] Capture conventions and tooling choices: `/audit`
+- [x] Install the tooling: `/develop tooling`
+- [x] Check it runs clean: `/test`
 
 ### 3. Data model · needs a decision
 Core database schema for tenant organizations, repositories, agent tasks, sandbox runs, audit logs, and encrypted credentials.

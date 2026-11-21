@@ -5,8 +5,10 @@
   "scripts": {
     "build": "echo \"Agent build ready\"",
     "dev": "uv run uvicorn app.main:app --reload --port 8000",
-    "lint": "echo \"Agent lint ready\"",
+    "format": "uv run ruff format .",
+    "format:check": "uv run ruff format --check .",
+    "lint": "uv run ruff check .",
     "test": "uv run pytest",
-    "typecheck": "echo \"Agent typecheck ready\""
+    "typecheck": "uv run pyright"
   }
 }

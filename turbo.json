@@ -11,6 +11,13 @@
     "lint": {
       "dependsOn": []
     },
+    "format": {
+      "dependsOn": [],
+      "cache": false
+    },
+    "format:check": {
+      "dependsOn": []
+    },
     "typecheck": {
       "dependsOn": []
     },
