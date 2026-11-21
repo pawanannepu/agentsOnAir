@@ -1,0 +1,12 @@
+{
+  "tool": "vitest",
+  "gate": null,
+  "additionalTools": [
+    "@testing-library/react",
+    "pytest"
+  ],
+  "e2eTool": "none",
+  "testDir": "tests",
+  "filePattern": "*.test.tsx",
+  "packageManager": "pnpm"
+}

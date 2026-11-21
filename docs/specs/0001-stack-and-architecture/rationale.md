@@ -1,11 +1,4 @@
-# 0001. Stack and architecture
-
-**Date**: 2026-11-21
-**Status**: Proposed
-
-## Summary
-
-This decision defines the foundational technology stack and repository architecture for agentsOnAir. We adopt a monorepo structure with Next.js for the web console and Python FastAPI with LangGraph for the autonomous agent execution engine. Untrusted code execution runs inside isolated E2B hardware microVM sandboxes, while PostgreSQL and Redis manage application state, checkpointing, and background queues. This foundation gives us fast developer velocity on the web front end alongside the rich AI ecosystem in Python, keeping the architecture clear and maintainable.
+# 0001. Stack and architecture: Rationale and Decision Record
 
 ## Context
 
@@ -59,14 +52,6 @@ This option builds a Python monolith using Django or FastAPI with server rendere
 * Server rendered templates struggle to deliver the highly interactive, terminal like streaming experience required for live task collaboration
 * Significantly smaller front end component ecosystem for complex developer dashboards
 
-## Decision
-
-**Chosen option**: Option 1: Polyglot monorepo with Next.js web console and Python FastAPI agent engine.
-
-We adopt a Turborepo monorepo separating the Next.js web console from the Python FastAPI agent service, using E2B microVMs for sandboxed execution, PostgreSQL for persistence, and Redis for background queues.
-
-**Implementation skills**: `nextjs-app-router-patterns` (`wshobson/agents`, `.agents/skills/nextjs-app-router-patterns/`) · `fastapi-templates` (`wshobson/agents`, `.agents/skills/fastapi-templates/`) · `clerk-nextjs-patterns` (`clerk/skills`, `.agents/skills/clerk-nextjs-patterns/`)
-
 ## Rationale
 
 Option 1 provides the best balance between developer experience, operational safety, and system capabilities (basis: your scope Tracer Bullet approach).
@@ -79,52 +64,6 @@ For security, E2B cloud microVMs deliver hardware level Firecracker isolation in
 
 Turborepo keeps both workspaces in a single repository, allowing coordinated pull requests, shared configuration, and unified continuous integration while preserving clear runtime separation.
 
-## Proposed stack
-
-| Layer | Choice | Reason |
-|---|---|---|
-| Monorepo & build | Turborepo | Clean workspace separation for web console and Python agent engine |
-| Web console | Next.js App Router (TypeScript) with Tailwind CSS | Fast server rendering, streaming agent views, and rich UI ecosystem |
-| Agent API service | FastAPI (Python 3.12) | Native async performance, automatic OpenAPI documentation, and typed validation |
-| Real time streaming | Server Sent Events (SSE) | Lightweight one way streaming for live agent execution logs and thoughts |
-| Agent orchestrator | LangGraph (Python) | Resilient cyclical graphs for plan, code, test, and review iterations |
-| Sandbox runtime | E2B microVM sandboxes | Hardware isolated Firecracker microVMs booting in subsecond times |
-| Primary database | PostgreSQL 16 | Relational ACID guarantees, JSONB flexibility, and state checkpointing |
-| Database access (Python) | SQLAlchemy 2.0 with Alembic | Typed database models, asyncpg query execution, and robust schema migrations |
-| Database access (Node.js) | Drizzle ORM | Lightweight, type safe database queries for web console data reads |
-| Task queue & broker | Redis with ARQ | Async Python worker queue with native coroutines and job dispatch |
-| Authentication | Clerk | Fast organization multi tenancy, GitHub OAuth, and session token verification |
-| Code host integration | GitHub App with Octokit | Fine grained repository permissions, webhook delivery, and Checks API |
-| Artifact storage | Cloudflare R2 / AWS S3 API | S3 compatible object storage with zero egress fees for run logs and diffs |
-| Observability & traces | OpenTelemetry with Langfuse | Specialized LLM tracing, token cost accounting, and step level replays |
-| Production hosting (Web) | Vercel | Global edge deployment, instant preview environments, and Next.js optimization |
-| Production hosting (Agent) | Fly.io or AWS ECS | Long running container workers for FastAPI services and Redis queues |
-
-## Consequences
-
-**Positive**:
-* Best in class tools for each domain: modern React on the front end, leading agent frameworks in Python on the backend.
-* Hardware isolated sandboxes prevent prompt injection escapes and malicious code from compromising host infrastructure.
-* Stateful checkpointing allows interrupted or failed agent tasks to resume seamlessly without losing work.
-* Clear boundary between web console and backend workers allows independent scaling and isolated failure domains.
-
-**Negative / tradeoffs**:
-* Polyglot development requires developers to install both Node.js and Python environments locally.
-* Inter service communication requires maintaining OpenAPI contracts and shared data schemas.
-* Running cloud microVMs introduces an external runtime dependency and variable cost per sandbox run.
-
-**Neutral**:
-* Local development will use Docker Compose for local PostgreSQL, Redis, and MinIO storage services.
-* Database schema changes will be driven primarily through Alembic migrations in the Python workspace.
-
-## Follow-up
-
-* [ ] Set up Turborepo workspace configuration with `apps/web` and `apps/agent` directory structure.
-* [ ] Create Docker Compose configuration for local PostgreSQL, Redis, and MinIO development services.
-* [ ] Configure GitHub App credentials and webhook signature verification in the agent service.
-* [ ] Configure GitHub MCP and PostgreSQL MCP as development servers when live database and repository inspection are required.
-* [ ] Capture project coding conventions and installed skill rules into root `AGENTS.md` via `/audit`.
-
 ## References
 
 **Project sources**:
@@ -135,6 +74,8 @@ Turborepo keeps both workspaces in a single repository, allowing coordinated pul
 
 **Practices & standards**:
 * MicroVM hardware isolation for untrusted code execution
+* Single writer database pattern for relational integrity
+* Redis Pub/Sub event bridge for real time log streaming
 * Cyclical graph state pattern for autonomous agent loops
 * Server Sent Events for low latency log streaming
 * Relational ACID persistence for agent run history and checkpointing

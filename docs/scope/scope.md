@@ -11,7 +11,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 
 | # | Feature | Phase | Status |
 |---|---------|-------|--------|
-| 1 | Stack & architecture | Foundation | planned |
+| 1 | Stack & architecture | Foundation | in-progress |
 | 2 | Coding standards & tooling | Foundation | planned |
 | 3 | Data model | Foundation | planned |
 | 4 | Design system & console UI foundation | Foundation | planned |
@@ -23,10 +23,16 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 
 ## Foundations
 
-### 1. Stack & architecture · needs a decision
+### 1. Stack & architecture
 Choose the primary runtime, language, and orchestrator framework, then scaffold a runnable repository so every later slice builds on real structure.
 **Done when:** the stack is recorded in a spec, and the empty scaffold builds, passes tests, and runs locally.
-- [ ] Decide the stack (spec): `/architect stack & architecture`
+spec [0001](../specs/0001-stack-and-architecture/index.md) · code in `apps/`
+- [x] Decide the stack (spec): `/architect stack & architecture`
+- [x] Scaffold from the decision: `/develop stack & architecture`
+- [x] Verify it: `/check verify stack & architecture`
+- [x] Test it: `/test stack & architecture`
+- [x] Review it (fresh model): `/check review stack & architecture`
+- [x] Document it: `/document stack & architecture`
 
 ### 2. Coding standards & tooling
 Capture conventions, then install lint, format, typecheck, and test runner tooling from the real scaffolded project.

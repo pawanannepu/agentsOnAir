@@ -1,0 +1,12 @@
+{
+  "name": "agent",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "echo \"Agent build ready\"",
+    "dev": "uv run uvicorn app.main:app --reload --port 8000",
+    "lint": "echo \"Agent lint ready\"",
+    "test": "uv run pytest",
+    "typecheck": "echo \"Agent typecheck ready\""
+  }
+}
