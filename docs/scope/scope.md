@@ -14,7 +14,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 1 | Stack & architecture | Foundation | done |
 | 2 | Coding standards & tooling | Foundation | in-progress |
 | 3 | Data model | Foundation | in-progress |
-| 4 | Design system & console UI foundation | Foundation | planned |
+| 4 | Design system & console UI foundation | Foundation | done |
 | 5 | Core autonomous engineer and reviewer loop | Slice 1 | planned |
 | 6 | Full repository context code reviewer | Slice 2 | planned |
 | 7 | Live task streaming & interactive collaboration | Slice 3 | planned |
@@ -56,10 +56,21 @@ spec [0002](../specs/0002-data-model/index.md) · code in `apps/agent/app/infras
 - [x] Review it (fresh model): /check review data model
 - [x] Document it: /document data model
 
-### 4. Design system & console UI foundation · needs a decision
+### 4. Design system & console UI foundation
 Visual design tokens, layout primitives, and reusable UI components for the web console so developers can inspect tasks and configure settings.
 **Done when:** design tokens define colors, typography, layout, and accessible base components support keyboard and screen navigation.
-- [ ] Design it (spec): `/architect design system & console UI foundation`
+spec [0003](../specs/0003-design-system-and-console-ui/index.md) · code in `apps/web/src/`
+- [x] Design it (spec): `/architect design system & console UI foundation`
+- [x] Build it: /develop design system & console UI foundation
+  - [x] Tailwind CSS v4 @theme design tokens, CSS first configuration, and utility helper (AC-1)
+  - [x] Core accessible CVA component primitives (Button, Badge, Card, Dialog, Tabs, Table, Input, Select) (AC-2)
+  - [x] Virtualized streaming TerminalViewer with ANSI parsing, auto scroll pin, and copy action (AC-3)
+  - [x] Sonner toast integration and Cmd+K CommandDialog global palette (AC-4, AC-5)
+  - [x] ConsoleLayout shell, collapsible Sidebar, Header with breadcrumbs, and route views (AC-6)
+- [x] Verify it: /check verify design system & console UI foundation
+- [x] Test it: /test design system & console UI foundation
+- [x] Review it (fresh model): /check review design system & console UI foundation
+- [x] Document it: /document design system & console UI foundation
 
 ## Slice 1: Core autonomous engineer and reviewer loop
 

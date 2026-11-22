@@ -2,61 +2,48 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import HomePage from "../src/app/page";
 
-describe("HomePage component (AC-1)", () => {
-  it("renders landing page brand and monorepo online badge (covers: AC-1)", () => {
-    render(<HomePage />);
-
-    expect(screen.getByText("AoA")).toBeInTheDocument();
-    expect(screen.getByText("agentsOnAir")).toBeInTheDocument();
-    expect(screen.getByText("v0.1.0 scaffold")).toBeInTheDocument();
-    expect(screen.getByText("Monorepo online")).toBeInTheDocument();
-  });
-
-  it("renders main heading and platform description (covers: AC-1)", () => {
+describe("HomePage console overview component (AC-1, AC-6)", () => {
+  it("renders mission control heading and platform description", () => {
     render(<HomePage />);
 
     const heading = screen.getByRole("heading", {
       level: 1,
-      name: /Autonomous Engineer and Reviewer Platform/i,
+      name: /Developer Mission Control/i,
     });
     expect(heading).toBeInTheDocument();
 
     expect(
       screen.getByText(
-        /Develops, tests, and verifies code inside isolated sandboxes/i
+        /Autonomous engineering, test execution, and code review in isolated microVM sandboxes/i
       )
     ).toBeInTheDocument();
   });
 
-  it("renders architecture cards for web, agent, services, and sandbox (covers: AC-1)", () => {
+  it("renders metric cards for active tasks, reviews, and connected repos", () => {
     render(<HomePage />);
 
-    expect(
-      screen.getByRole("heading", { level: 2, name: "Web Console" })
-    ).toBeInTheDocument();
-    expect(screen.getByText("apps/web")).toBeInTheDocument();
-
-    expect(
-      screen.getByRole("heading", { level: 2, name: "Agent Engine" })
-    ).toBeInTheDocument();
-    expect(screen.getByText("apps/agent")).toBeInTheDocument();
-
-    expect(
-      screen.getByRole("heading", { level: 2, name: "Local Services" })
-    ).toBeInTheDocument();
-    expect(screen.getByText("docker-compose.yml")).toBeInTheDocument();
-
-    expect(
-      screen.getByRole("heading", { level: 2, name: "Execution Isolation" })
-    ).toBeInTheDocument();
-    expect(screen.getByText("SandboxProvider")).toBeInTheDocument();
+    expect(screen.getByText("Active Agent Tasks")).toBeInTheDocument();
+    expect(screen.getByText("Awaiting Review")).toBeInTheDocument();
+    expect(screen.getByText("Verified Pull Requests")).toBeInTheDocument();
+    expect(screen.getByText("Connected Repos")).toBeInTheDocument();
   });
 
-  it("provides accessible semantic structure with landmarks (covers: AC-1)", () => {
+  it("renders recent execution tasks list with links", () => {
     render(<HomePage />);
 
-    expect(screen.getByRole("banner")).toBeInTheDocument();
-    expect(screen.getByRole("main")).toBeInTheDocument();
-    expect(screen.getByRole("contentinfo")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 2, name: /Recent Execution Tasks/i })
+    ).toBeInTheDocument();
+
+    expect(
+      screen.getByText(/integrate Clerk JWKS JWT verification/i)
+    ).toBeInTheDocument();
+  });
+
+  it("renders platform infrastructure architecture cards", () => {
+    render(<HomePage />);
+
+    expect(screen.getByText("Sandbox Execution Runtime")).toBeInTheDocument();
+    expect(screen.getByText("Engine Services")).toBeInTheDocument();
   });
 });
