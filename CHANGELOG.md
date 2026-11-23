@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Global command palette (CommandDialog) with keyboard shortcut support (Cmd+K or Ctrl+K), quick navigation across tasks, repositories, and settings, and local storage recent task caching
 - Console application shell with collapsible sidebar navigation, persistent cookie state, dynamic breadcrumb header, and route views for tasks, task details, repositories, and workspace settings
 - Vitest component and view integration test suite with 44 tests covering design primitives, keyboard navigation, and breadcrumb state stability
+- Cyclical autonomous engineering and review engine pairing Forge coder with Reviewer critic for bounded test and repair cycles (see spec 0004)
+- GitHub webhook ingestion pipeline verifying HMAC SHA256 signatures and routing issue triggers with duplicate task filtering
+- Review iterations schema and Alembic migration recording structured critic findings, diff snapshots, and pull request tracking columns
+- Sandbox workspace runner executing baseline tests on untouched base branches before agent edits to detect preexisting test failures
+- Automated pull request creation on GitHub with extracted patches, changelog summaries, and immutable audit log trails upon reviewer approval
 
 ### Fixed
 - Infinite re render loop in breadcrumb context hook by memoizing item comparisons and bailing out on stable content

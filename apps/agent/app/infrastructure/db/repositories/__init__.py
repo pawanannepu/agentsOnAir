@@ -12,6 +12,9 @@ from app.infrastructure.db.repositories.organization_repository import (
 from app.infrastructure.db.repositories.repository_repository import (
     SqlAlchemyRepositoryRepository,
 )
+from app.infrastructure.db.repositories.review_iteration_repository import (
+    SqlAlchemyReviewIterationRepository,
+)
 from app.infrastructure.db.repositories.sandbox_run_repository import (
     SqlAlchemySandboxRunRepository,
 )
@@ -27,6 +30,7 @@ __all__ = [
     "SqlAlchemyCredentialRepository",
     "SqlAlchemyOrganizationRepository",
     "SqlAlchemyRepositoryRepository",
+    "SqlAlchemyReviewIterationRepository",
     "SqlAlchemySandboxRunRepository",
     "SqlAlchemyTaskRepository",
     "SqlAlchemyTaskRunRepository",

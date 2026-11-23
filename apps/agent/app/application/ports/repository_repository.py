@@ -33,6 +33,10 @@ class RepositoryRepository(Protocol):
         """Retrieve an active repository by GitHub repository ID."""
         ...
 
+    async def find_by_github_repo_id(self, github_repo_id: int) -> Repository | None:
+        """Retrieve an active repository across orgs by GitHub ID."""
+        ...
+
     async def list_by_org(
         self, org_id: uuid.UUID, page: int = 1, page_size: int = 20
     ) -> tuple[list[Repository], int]:

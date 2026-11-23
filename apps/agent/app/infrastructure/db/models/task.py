@@ -65,8 +65,26 @@ class TaskModel(Base, TimestampMixin, SoftDeleteMixin):
         String(255),
         nullable=True,
     )
+    base_branch: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        default="main",
+        server_default="main",
+    )
     pr_number: Mapped[int | None] = mapped_column(
         Integer,
+        nullable=True,
+    )
+    pr_url: Mapped[str | None] = mapped_column(
+        String(512),
+        nullable=True,
+    )
+    head_commit_sha: Mapped[str | None] = mapped_column(
+        String(40),
+        nullable=True,
+    )
+    pr_review_status: Mapped[str | None] = mapped_column(
+        String(50),
         nullable=True,
     )
     created_by_clerk_user_id: Mapped[str | None] = mapped_column(
@@ -85,6 +103,15 @@ class TaskModel(Base, TimestampMixin, SoftDeleteMixin):
             "ix_tasks_repo_created",
             "repo_id",
             text("created_at DESC"),
+        ),
+        Index(
+            "uq_tasks_active_repo_issue",
+            "repo_id",
+            text("(trigger_metadata->>'issue_number')"),
+            unique=True,
+            postgresql_where=text(
+                "status IN ('queued', 'in_progress') AND deleted_at IS NULL"
+            ),
         ),
     )
 

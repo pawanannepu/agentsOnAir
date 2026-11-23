@@ -17,6 +17,8 @@ class TaskRepository(Protocol):
         description: str,
         trigger_type: str,
         trigger_metadata: dict | None = None,
+        base_branch: str = "main",
+        branch_name: str | None = None,
         created_by_clerk_user_id: str | None = None,
     ) -> Task:
         """Create a new task scoped to an organization and repository."""
@@ -24,6 +26,12 @@ class TaskRepository(Protocol):
 
     async def get_by_id(self, org_id: uuid.UUID, task_id: uuid.UUID) -> Task:
         """Retrieve a task scoped to an organization."""
+        ...
+
+    async def find_active_by_repo_and_issue(
+        self, repo_id: uuid.UUID, issue_number: int
+    ) -> Task | None:
+        """Find an active task for an issue in a repository."""
         ...
 
     async def list_by_repo(
@@ -41,6 +49,19 @@ class TaskRepository(Protocol):
         pr_number: int | None = None,
     ) -> Task:
         """Update the status and branch/PR coordinates of a task."""
+        ...
+
+    async def update_pr_details(
+        self,
+        org_id: uuid.UUID,
+        task_id: uuid.UUID,
+        pr_url: str,
+        head_commit_sha: str,
+        pr_review_status: str,
+        pr_number: int | None = None,
+        branch_name: str | None = None,
+    ) -> Task:
+        """Update the pull request coordinates and review status of a task."""
         ...
 
     async def soft_delete(self, org_id: uuid.UUID, task_id: uuid.UUID) -> None:

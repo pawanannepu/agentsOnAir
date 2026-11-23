@@ -98,6 +98,14 @@ class SqlAlchemyRepositoryRepository(RepositoryRepository):
             )
         return _to_entity(model)
 
+    async def find_by_github_repo_id(self, github_repo_id: int) -> Repository | None:
+        stmt = select(RepositoryModel).where(
+            RepositoryModel.github_repo_id == github_repo_id,
+            RepositoryModel.deleted_at.is_(None),
+        )
+        model = (await self._session.execute(stmt)).scalar_one_or_none()
+        return _to_entity(model) if model else None
+
     async def list_by_org(
         self, org_id: uuid.UUID, page: int = 1, page_size: int = 20
     ) -> tuple[list[Repository], int]:

@@ -21,6 +21,7 @@ from app.infrastructure.db.base import Base, TimestampMixin, uuid7
 
 if TYPE_CHECKING:
     from app.infrastructure.db.models.organization import OrganizationModel
+    from app.infrastructure.db.models.review_iteration import ReviewIterationModel
     from app.infrastructure.db.models.sandbox_run import SandboxRunModel
     from app.infrastructure.db.models.task import TaskModel
 
@@ -132,4 +133,10 @@ class TaskRunModel(Base, TimestampMixin):
         back_populates="task_run",
         uselist=False,
         cascade="all, delete-orphan",
+    )
+    review_iterations: Mapped[list["ReviewIterationModel"]] = relationship(
+        "ReviewIterationModel",
+        back_populates="task_run",
+        cascade="all, delete-orphan",
+        order_by="ReviewIterationModel.cycle_number",
     )

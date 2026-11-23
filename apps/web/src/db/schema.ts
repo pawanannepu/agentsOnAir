@@ -118,7 +118,11 @@ export const tasks = pgTable(
     triggerType: varchar("trigger_type", { length: 50 }).notNull(),
     triggerMetadata: jsonb("trigger_metadata").notNull().default({}),
     branchName: varchar("branch_name", { length: 255 }),
+    baseBranch: varchar("base_branch", { length: 100 }).notNull().default("main"),
     prNumber: integer("pr_number"),
+    prUrl: varchar("pr_url", { length: 512 }),
+    headCommitSha: varchar("head_commit_sha", { length: 40 }),
+    prReviewStatus: varchar("pr_review_status", { length: 50 }),
     createdByClerkUserId: varchar("created_by_clerk_user_id", { length: 255 }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
@@ -135,6 +139,9 @@ export const tasks = pgTable(
       table.createdAt
     ),
     index("ix_tasks_repo_created").on(table.repoId, table.createdAt),
+    uniqueIndex("uq_tasks_active_repo_issue")
+      .on(table.repoId, sql`(${table.triggerMetadata}->>'issue_number')`)
+      .where(sql`${table.status} IN ('queued', 'in_progress') AND ${table.deletedAt} IS NULL`),
   ]
 );
 
@@ -236,5 +243,38 @@ export const auditLogs = pgTable(
   (table) => [
     index("ix_audit_logs_org_created").on(table.orgId, table.createdAt),
     index("ix_audit_logs_target").on(table.targetType, table.targetId),
+  ]
+);
+
+export const reviewIterations = pgTable(
+  "review_iterations",
+  {
+    id: uuid("id").primaryKey(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "restrict" }),
+    taskRunId: uuid("task_run_id")
+      .notNull()
+      .references(() => taskRuns.id, { onDelete: "cascade" }),
+    cycleNumber: integer("cycle_number").notNull(),
+    verdict: varchar("verdict", { length: 50 }).notNull(),
+    summary: text("summary").notNull(),
+    findings: jsonb("findings").notNull().default([]),
+    blockingCount: integer("blocking_count").notNull().default(0),
+    nonBlockingCount: integer("non_blocking_count").notNull().default(0),
+    diffSnapshot: text("diff_snapshot"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("ix_review_iterations_run_cycle").on(
+      table.taskRunId,
+      table.cycleNumber
+    ),
+    index("ix_review_iterations_org_created").on(
+      table.orgId,
+      table.createdAt
+    ),
   ]
 );

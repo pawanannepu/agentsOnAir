@@ -34,3 +34,15 @@ class DecryptionError(DomainError):
 
 class InvalidStateTransitionError(DomainError):
     """Raised when an entity cannot transition to the target state."""
+
+
+class WebhookSignatureError(DomainError):
+    """Raised when GitHub webhook signature verification fails."""
+
+
+class BaselineTestFailedError(DomainError):
+    """Raised when base branch baseline tests fail before agent modifications."""
+
+
+class ReviewCycleLimitExhaustedError(DomainError):
+    """Raised when the outer review loop exhausts its maximum cycle cap."""

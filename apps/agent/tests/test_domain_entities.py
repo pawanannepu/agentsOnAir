@@ -18,10 +18,12 @@ from app.domain.entities.audit_log import AuditLog
 from app.domain.entities.credential import Credential, CredentialMetadata
 from app.domain.entities.organization import Organization
 from app.domain.entities.repository import Repository
+from app.domain.entities.review_iteration import ReviewIteration
 from app.domain.entities.sandbox_run import SandboxRun
 from app.domain.entities.task import Task
 from app.domain.entities.task_run import TaskRun
 from app.domain.exceptions import (
+    BaselineTestFailedError,
     ConcurrencyError,
     ConflictError,
     DecryptionError,
@@ -29,6 +31,7 @@ from app.domain.exceptions import (
     InvalidStateTransitionError,
     NotFoundError,
     ValidationError,
+    WebhookSignatureError,
 )
 
 
@@ -211,3 +214,90 @@ def test_domain_exceptions_hierarchy():
         assert isinstance(exc, DomainError)
         assert isinstance(exc, Exception)
         assert len(exc.message) > 0
+
+
+def test_review_iteration_entity_slots_and_defaults():
+    """Verify ReviewIteration entity attributes and slots (covers: AC 4)."""
+    rev_id = uuid.uuid4()
+    org_id = uuid.uuid4()
+    task_run_id = uuid.uuid4()
+
+    iteration = ReviewIteration(
+        id=rev_id,
+        org_id=org_id,
+        task_run_id=task_run_id,
+        cycle_number=1,
+        verdict="approved",
+        summary="Changes verified and clean",
+        findings=[
+            {
+                "file_path": "src/auth.py",
+                "line_number": 12,
+                "severity": "minor",
+                "message": "Add docstring",
+                "suggested_fix": "# docstring",
+            }
+        ],
+        blocking_count=0,
+        non_blocking_count=1,
+        diff_snapshot="--- a/src/auth.py\n+++ b/src/auth.py",
+    )
+
+    assert iteration.id == rev_id
+    assert iteration.org_id == org_id
+    assert iteration.task_run_id == task_run_id
+    assert iteration.cycle_number == 1
+    assert iteration.verdict == "approved"
+    assert iteration.summary == "Changes verified and clean"
+    assert len(iteration.findings) == 1
+    assert iteration.blocking_count == 0
+    assert iteration.non_blocking_count == 1
+    assert iteration.diff_snapshot is not None
+    assert iteration.created_at is None
+    _assert_slots_enforced(iteration)
+
+
+def test_task_entity_spec_0004_fields():
+    """Verify Task entity PR and branch attributes (covers: AC 1, AC 5)."""
+    task_id = uuid.uuid4()
+    org_id = uuid.uuid4()
+    repo_id = uuid.uuid4()
+
+    task = Task(
+        id=task_id,
+        org_id=org_id,
+        repo_id=repo_id,
+        title="Implement caching",
+        description="Add redis caching",
+        trigger_type="github_issue",
+        base_branch="develop",
+        branch_name="agentsonair/task-test01-issue-10",
+        pr_number=123,
+        pr_url="https://github.com/org/repo/pull/123",
+        head_commit_sha="a" * 40,
+        pr_review_status="approved",
+    )
+
+    assert task.base_branch == "develop"
+    assert task.branch_name == "agentsonair/task-test01-issue-10"
+    assert task.pr_number == 123
+    assert task.pr_url == "https://github.com/org/repo/pull/123"
+    assert task.head_commit_sha == "a" * 40
+    assert task.pr_review_status == "approved"
+    _assert_slots_enforced(task)
+
+
+def test_spec_0004_domain_exceptions():
+    """Verify BaselineTestFailedError and WebhookSignatureError domain exceptions."""
+    baseline_err = BaselineTestFailedError(
+        "Tests failed on base branch with exit code 1"
+    )
+    webhook_err = WebhookSignatureError("Invalid HMAC signature header")
+
+    assert isinstance(baseline_err, DomainError)
+    assert isinstance(baseline_err, Exception)
+    assert "exit code 1" in baseline_err.message
+
+    assert isinstance(webhook_err, DomainError)
+    assert isinstance(webhook_err, Exception)
+    assert "Invalid HMAC" in webhook_err.message

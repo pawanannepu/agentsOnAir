@@ -15,7 +15,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 2 | Coding standards & tooling | Foundation | in-progress |
 | 3 | Data model | Foundation | in-progress |
 | 4 | Design system & console UI foundation | Foundation | done |
-| 5 | Core autonomous engineer and reviewer loop | Slice 1 | planned |
+| 5 | Core autonomous engineer and reviewer loop | Slice 1 | in-progress |
 | 6 | Full repository context code reviewer | Slice 2 | planned |
 | 7 | Live task streaming & interactive collaboration | Slice 3 | planned |
 | 8 | Guardrails, branch protection & budget limits | Slice 4 | planned |
@@ -74,10 +74,21 @@ spec [0003](../specs/0003-design-system-and-console-ui/index.md) · code in `app
 
 ## Slice 1: Core autonomous engineer and reviewer loop
 
-### 5. Core autonomous engineer and reviewer loop · needs a decision
+### 5. Core autonomous engineer and reviewer loop
 Connect the initial working thread through every layer: a GitHub task trigger starts an isolated sandbox, forge writes code and runs tests against a mock repository and mock model harness, the independent reviewer checks the diff, forge applies fixes, and opens a verified GitHub pull request.
 **Done when:** an issue or webhook triggers a task, runs in an isolated sandbox, passes autonomous review, and opens a pull request with changelog and audit trail.
-- [ ] Design it (spec): `/architect core autonomous engineer and reviewer loop`
+spec [0004](../specs/0004-core-autonomous-engineer-and-reviewer-loop/index.md) · code in `apps/agent/`
+- [x] Design it (spec): `/architect core autonomous engineer and reviewer loop`
+- [x] Build it: /develop core autonomous engineer and reviewer loop
+  - [x] Database migration for review iterations, task PR fields, and active task index (AC-1)
+  - [x] GitHub App webhook handler, event router, and duplicate filter (AC-1)
+  - [x] Sandbox workspace init, baseline test runner, and inner ReAct tool runner (AC-3)
+  - [x] Cyclical LangGraph engine with Forge coder and Reviewer critic (AC-2, AC-4)
+  - [x] Host patch extraction, branch push, PR creation, and audit logging (AC-5)
+- [x] Verify it: /check verify core autonomous engineer and reviewer loop
+- [x] Test it: /test core autonomous engineer and reviewer loop
+- [x] Review it (fresh model): /check review core autonomous engineer and reviewer loop
+- [x] Document it: /document core autonomous engineer and reviewer loop
 
 ## Slice 2: Full repository context code reviewer
 

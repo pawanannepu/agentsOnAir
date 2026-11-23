@@ -17,8 +17,12 @@ class Task:
     trigger_type: str
     status: str = "queued"
     trigger_metadata: dict = field(default_factory=dict)
+    base_branch: str = "main"
     branch_name: str | None = None
     pr_number: int | None = None
+    pr_url: str | None = None
+    head_commit_sha: str | None = None
+    pr_review_status: str | None = None
     created_by_clerk_user_id: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
