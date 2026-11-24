@@ -66,6 +66,24 @@ class RepositoryModel(Base, TimestampMixin, SoftDeleteMixin):
         default=dict,
         server_default=text("'{}'::jsonb"),
     )
+    review_settings: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=lambda: {
+            "enabled": True,
+            "auto_review": True,
+            "allow_approval": False,
+            "ignore_all_bots": False,
+            "min_severity": "info",
+            "max_comments": 25,
+            "ignored_paths": ["*.lock", "dist/**", "node_modules/**"],
+        },
+        server_default=text(
+            """'{"enabled": true, "auto_review": true, "allow_approval": false, """
+            """"ignore_all_bots": false, "min_severity": "info", "max_comments": 25, """
+            """"ignored_paths": ["*.lock", "dist/**", "node_modules/**"]}'::jsonb"""
+        ),
+    )
 
     __table_args__ = (
         Index(

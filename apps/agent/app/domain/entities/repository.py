@@ -18,6 +18,17 @@ class Repository:
     default_branch: str = "main"
     is_private: bool = True
     config: dict = field(default_factory=dict)
+    review_settings: dict = field(
+        default_factory=lambda: {
+            "enabled": True,
+            "auto_review": True,
+            "allow_approval": False,
+            "ignore_all_bots": False,
+            "min_severity": "info",
+            "max_comments": 25,
+            "ignored_paths": ["*.lock", "dist/**", "node_modules/**"],
+        }
+    )
     created_at: datetime | None = None
     updated_at: datetime | None = None
     deleted_at: datetime | None = None

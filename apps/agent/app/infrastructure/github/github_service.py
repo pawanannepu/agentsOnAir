@@ -55,3 +55,53 @@ class GitHubService(GitHubGateway):
             "pr_url": pr_url,
             "pr_number": pr_number,
         }
+
+    async def get_pull_request(
+        self,
+        repo_full_name: str,
+        pr_number: int,
+        token: str,
+    ) -> dict:
+        return {
+            "number": pr_number,
+            "title": f"Pull Request #{pr_number}",
+            "user": {"login": "contributor"},
+            "head": {"sha": "headsha" + "0" * 33},
+            "base": {"sha": "basesha" + "0" * 33},
+        }
+
+    async def get_pull_request_diff(
+        self,
+        repo_full_name: str,
+        pr_number: int,
+        token: str,
+    ) -> str:
+        return (
+            "diff --git a/src/main.py b/src/main.py\n"
+            "index 0000000..1111111 100644\n"
+            "--- a/src/main.py\n"
+            "+++ b/src/main.py\n"
+            "@@ -1,5 +1,5 @@\n"
+            "-def old():\n"
+            "+def new():\n"
+            "     pass\n"
+        )
+
+    async def submit_review(
+        self,
+        repo_full_name: str,
+        pr_number: int,
+        commit_sha: str,
+        body: str,
+        event: str,
+        comments: list[dict],
+        token: str,
+    ) -> dict:
+        review_id = int(time.time() * 1000) % 10000000
+        return {
+            "id": review_id,
+            "body": body,
+            "event": event,
+            "commit_id": commit_sha,
+            "comments": comments,
+        }

@@ -16,7 +16,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 3 | Data model | Foundation | in-progress |
 | 4 | Design system & console UI foundation | Foundation | done |
 | 5 | Core autonomous engineer and reviewer loop | Slice 1 | in-progress |
-| 6 | Full repository context code reviewer | Slice 2 | planned |
+| 6 | Full repository context code reviewer | Slice 2 | in-progress |
 | 7 | Live task streaming & interactive collaboration | Slice 3 | planned |
 | 8 | Guardrails, branch protection & budget limits | Slice 4 | planned |
 | 9 | Custom review rules & feedback learning | Slice 5 | planned |
@@ -92,10 +92,22 @@ spec [0004](../specs/0004-core-autonomous-engineer-and-reviewer-loop/index.md) �
 
 ## Slice 2: Full repository context code reviewer
 
-### 6. Full repository context code reviewer · needs a decision
+### 6. Full repository context code reviewer
 Review pull requests authored by humans or agents by reading the full repository context, ranking issues by severity, and posting line comments and suggested fixes.
 **Done when:** a pull request triggers a review that analyzes repository context beyond the diff, ranks findings by severity, and posts actionable comments to GitHub.
-- [ ] Design it (spec): `/architect full repository context code reviewer`
+spec [0005](../specs/0005-full-repository-context-code-reviewer/index.md) · code in `apps/agent/`
+- [x] Design it (spec): `/architect full repository context code reviewer`
+- [x] Build it: /develop full repository context code reviewer
+  - [x] Database migration for PR reviews, findings, active unique index, and review settings (AC-1, AC-5)
+  - [x] GitHub webhook router extension with PR detail fetch and bot author exclusion (AC-1)
+  - [x] Tree-sitter symbol indexer and two tier context budget allocator (AC-2, AC-3)
+  - [x] LangGraph structured reviewer node with Claude Sonnet (AC-4)
+  - [x] GitHub review publisher with DiffHunkParser, inline suggestions, and 422 fallback (AC-5)
+  - [x] Console REST API endpoints for PR reviews and findings (AC-5)
+- [x] Verify it: /check verify full repository context code reviewer
+- [x] Test it: /test full repository context code reviewer
+- [x] Review it (fresh model): /check review full repository context code reviewer
+- [x] Document it: /document full repository context code reviewer
 
 ## Slice 3: Live task streaming & interactive collaboration
 

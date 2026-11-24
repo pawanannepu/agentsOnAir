@@ -48,5 +48,6 @@ pnpm --filter agent lint
 ## Related specs
 
 - [0001 Stack and architecture](../../docs/specs/0001-stack-and-architecture/index.md)
+- [0005 Full repository context code reviewer](../../docs/specs/0005-full-repository-context-code-reviewer/index.md)
 
 _Drafted by /audit from the repo, worth a quick human pass. Edit freely: once a line stops matching this draft, later runs treat it as curated and will flag rather than overwrite it._

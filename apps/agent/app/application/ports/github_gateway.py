@@ -34,3 +34,34 @@ class GitHubGateway(Protocol):
     ) -> dict[str, str | int]:
         """Open a pull request on GitHub."""
         ...
+
+    async def get_pull_request(
+        self,
+        repo_full_name: str,
+        pr_number: int,
+        token: str,
+    ) -> dict:
+        """Fetch pull request metadata from GitHub API."""
+        ...
+
+    async def get_pull_request_diff(
+        self,
+        repo_full_name: str,
+        pr_number: int,
+        token: str,
+    ) -> str:
+        """Fetch unified diff for pull request."""
+        ...
+
+    async def submit_review(
+        self,
+        repo_full_name: str,
+        pr_number: int,
+        commit_sha: str,
+        body: str,
+        event: str,
+        comments: list[dict],
+        token: str,
+    ) -> dict:
+        """Submit unified review with optional inline comments."""
+        ...

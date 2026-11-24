@@ -23,6 +23,7 @@ def _to_entity(model: RepositoryModel) -> Repository:
         default_branch=model.default_branch,
         is_private=model.is_private,
         config=model.config or {},
+        review_settings=getattr(model, "review_settings", None) or {},
         created_at=model.created_at,
         updated_at=model.updated_at,
         deleted_at=model.deleted_at,

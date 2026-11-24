@@ -118,7 +118,9 @@ export const tasks = pgTable(
     triggerType: varchar("trigger_type", { length: 50 }).notNull(),
     triggerMetadata: jsonb("trigger_metadata").notNull().default({}),
     branchName: varchar("branch_name", { length: 255 }),
-    baseBranch: varchar("base_branch", { length: 100 }).notNull().default("main"),
+    baseBranch: varchar("base_branch", { length: 100 })
+      .notNull()
+      .default("main"),
     prNumber: integer("pr_number"),
     prUrl: varchar("pr_url", { length: 512 }),
     headCommitSha: varchar("head_commit_sha", { length: 40 }),
@@ -141,7 +143,9 @@ export const tasks = pgTable(
     index("ix_tasks_repo_created").on(table.repoId, table.createdAt),
     uniqueIndex("uq_tasks_active_repo_issue")
       .on(table.repoId, sql`(${table.triggerMetadata}->>'issue_number')`)
-      .where(sql`${table.status} IN ('queued', 'in_progress') AND ${table.deletedAt} IS NULL`),
+      .where(
+        sql`${table.status} IN ('queued', 'in_progress') AND ${table.deletedAt} IS NULL`
+      ),
   ]
 );
 
@@ -272,9 +276,6 @@ export const reviewIterations = pgTable(
       table.taskRunId,
       table.cycleNumber
     ),
-    index("ix_review_iterations_org_created").on(
-      table.orgId,
-      table.createdAt
-    ),
+    index("ix_review_iterations_org_created").on(table.orgId, table.createdAt),
   ]
 );

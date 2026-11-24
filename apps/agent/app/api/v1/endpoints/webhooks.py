@@ -10,6 +10,9 @@ from app.application.use_cases.ingest_github_webhook import (
 )
 from app.core.config import settings
 from app.domain.exceptions import WebhookSignatureError
+from app.infrastructure.db.repositories.pr_review_repository import (
+    SqlAlchemyPRReviewRepository,
+)
 from app.infrastructure.db.repositories.repository_repository import (
     SqlAlchemyRepositoryRepository,
 )
@@ -17,6 +20,7 @@ from app.infrastructure.db.repositories.task_repository import (
     SqlAlchemyTaskRepository,
 )
 from app.infrastructure.db.session import get_db
+from app.infrastructure.github.github_service import GitHubService
 
 router = APIRouter()
 
@@ -36,7 +40,17 @@ async def handle_github_webhook(
 
     repo_repo = SqlAlchemyRepositoryRepository(db)
     task_repo = SqlAlchemyTaskRepository(db)
-    use_case = IngestGitHubWebhookUseCase(repo_repo, task_repo)
+    pr_review_repo = SqlAlchemyPRReviewRepository(db)
+    github_gateway = GitHubService(
+        app_id=settings.GITHUB_APP_ID,
+        private_key=settings.GITHUB_APP_PRIVATE_KEY,
+    )
+    use_case = IngestGitHubWebhookUseCase(
+        repository_repo=repo_repo,
+        task_repo=task_repo,
+        pr_review_repo=pr_review_repo,
+        github_gateway=github_gateway,
+    )
 
     try:
         result = await use_case.execute(
@@ -52,6 +66,8 @@ async def handle_github_webhook(
     response_data: dict[str, str | None] = {"status": result.status}
     if result.task_id:
         response_data["task_id"] = result.task_id
+    if result.review_id:
+        response_data["review_id"] = result.review_id
     if result.reason:
         response_data["reason"] = result.reason
 
