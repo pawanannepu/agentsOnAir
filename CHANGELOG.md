@@ -28,6 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Review iterations schema and Alembic migration recording structured critic findings, diff snapshots, and pull request tracking columns
 - Sandbox workspace runner executing baseline tests on untouched base branches before agent edits to detect preexisting test failures
 - Automated pull request creation on GitHub with extracted patches, changelog summaries, and immutable audit log trails upon reviewer approval
+- Live task streaming endpoint over Server Sent Events backed by capped Redis Streams with `Last-Event-ID` cursor replay and keep alive pings (see spec 0006)
+- LangGraph human in the loop clarification interrupts with PostgreSQL checkpoint persistence, sandbox timeout extension, ARQ task resumption, and a 15 minute expiration watchdog
+- Authenticated task collaboration endpoints for developer steering guidance, optimistic concurrency clarification replies, and task cancellation with audit logging
+- Transcript archival storing gzip compressed terminal logs and structured stream events in PostgreSQL alongside an in flight transcript fallback endpoint
+- Console task detail inspector and `useTaskStream` hook displaying live ANSI terminal logs, phase filtered step progress, clarification banners, and steering controls
 
 ### Fixed
 - Infinite re render loop in breadcrumb context hook by memoizing item comparisons and bailing out on stable content

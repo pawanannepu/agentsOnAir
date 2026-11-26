@@ -1,10 +1,10 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi, beforeAll, beforeEach } from "vitest";
 import * as React from "react";
-import TasksPage from "../src/app/tasks/page";
-import { TaskDetailClient } from "../src/app/tasks/[id]/task-detail-client";
-import RepositoriesPage from "../src/app/repositories/page";
-import SettingsPage from "../src/app/settings/page";
+import { TasksView } from "../src/app/(console)/tasks/tasks-view";
+import { TaskDetailClient } from "../src/app/(console)/tasks/[id]/task-detail-client";
+import { RepositoriesView } from "../src/app/(console)/repositories/repositories-view";
+import { SettingsView } from "../src/app/(console)/settings/settings-view";
 import { Sidebar } from "../src/components/layout/sidebar";
 import { Header } from "../src/components/layout/header";
 import { BreadcrumbProvider } from "../src/components/layout/breadcrumb-context";
@@ -46,7 +46,7 @@ describe("TasksPage View (AC-2, AC-6)", () => {
   it("renders tasks header and initial task rows", () => {
     render(
       <BreadcrumbProvider>
-        <TasksPage />
+        <TasksView />
       </BreadcrumbProvider>
     );
 
@@ -68,7 +68,7 @@ describe("TasksPage View (AC-2, AC-6)", () => {
   it("filters tasks by status tab", () => {
     render(
       <BreadcrumbProvider>
-        <TasksPage />
+        <TasksView />
       </BreadcrumbProvider>
     );
 
@@ -106,7 +106,7 @@ describe("TasksPage View (AC-2, AC-6)", () => {
   it("filters tasks by text search and shows empty state when no match", () => {
     render(
       <BreadcrumbProvider>
-        <TasksPage />
+        <TasksView />
       </BreadcrumbProvider>
     );
 
@@ -178,7 +178,7 @@ describe("RepositoriesPage View (AC-6)", () => {
   it("renders connected repositories and badge states", () => {
     render(
       <BreadcrumbProvider>
-        <RepositoriesPage />
+        <RepositoriesView />
       </BreadcrumbProvider>
     );
 
@@ -197,7 +197,7 @@ describe("SettingsPage View (AC-4, AC-6)", () => {
   it("renders workspace settings and handles form save", () => {
     render(
       <BreadcrumbProvider>
-        <SettingsPage />
+        <SettingsView />
       </BreadcrumbProvider>
     );
 

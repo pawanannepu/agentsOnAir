@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
+  customType,
   index,
   integer,
   jsonb,
@@ -12,6 +13,12 @@ import {
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
+
+const bytea = customType<{ data: Buffer; notNull: true; default: false }>({
+  dataType() {
+    return "bytea";
+  },
+});
 
 export const organizations = pgTable(
   "organizations",
@@ -126,6 +133,12 @@ export const tasks = pgTable(
     headCommitSha: varchar("head_commit_sha", { length: 40 }),
     prReviewStatus: varchar("pr_review_status", { length: 50 }),
     createdByClerkUserId: varchar("created_by_clerk_user_id", { length: 255 }),
+    interruptionPrompt: text("interruption_prompt"),
+    interruptionType: varchar("interruption_type", { length: 50 }),
+    interruptionOptions: jsonb("interruption_options"),
+    interruptionExpiresAt: timestamp("interruption_expires_at", {
+      withTimezone: true,
+    }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -144,7 +157,7 @@ export const tasks = pgTable(
     uniqueIndex("uq_tasks_active_repo_issue")
       .on(table.repoId, sql`(${table.triggerMetadata}->>'issue_number')`)
       .where(
-        sql`${table.status} IN ('queued', 'in_progress') AND ${table.deletedAt} IS NULL`
+        sql`${table.status} IN ('queued', 'in_progress', 'awaiting_input') AND ${table.deletedAt} IS NULL`
       ),
   ]
 );
@@ -277,5 +290,69 @@ export const reviewIterations = pgTable(
       table.cycleNumber
     ),
     index("ix_review_iterations_org_created").on(table.orgId, table.createdAt),
+  ]
+);
+
+export const taskInterventions = pgTable(
+  "task_interventions",
+  {
+    id: uuid("id").primaryKey(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    taskRunId: uuid("task_run_id").references(() => taskRuns.id, {
+      onDelete: "set null",
+    }),
+    clerkUserId: varchar("clerk_user_id", { length: 255 }).notNull(),
+    interventionType: varchar("intervention_type", { length: 50 }).notNull(),
+    promptSnapshot: text("prompt_snapshot"),
+    payload: jsonb("payload").notNull().default({}),
+    appliedAt: timestamp("applied_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("ix_task_interventions_task_created").on(
+      table.taskId,
+      table.createdAt
+    ),
+    index("ix_task_interventions_org_created").on(table.orgId, table.createdAt),
+  ]
+);
+
+export const taskTranscripts = pgTable(
+  "task_transcripts",
+  {
+    id: uuid("id").primaryKey(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    taskRunId: uuid("task_run_id")
+      .notNull()
+      .unique()
+      .references(() => taskRuns.id, { onDelete: "cascade" }),
+    terminalLog: bytea("terminal_log").notNull(),
+    eventsJson: jsonb("events_json").notNull().default([]),
+    totalLines: integer("total_lines").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("ix_task_transcripts_task_created").on(table.taskId, table.createdAt),
+    index("ix_task_transcripts_org_created").on(table.orgId, table.createdAt),
   ]
 );

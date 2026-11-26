@@ -3,6 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { OrganizationSwitcher, UserButton } from "@clerk/nextjs";
 import {
   Terminal,
   FolderGit2,
@@ -11,9 +12,11 @@ import {
   ChevronRight,
   ShieldCheck,
   Bot,
+  Building2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { isClerkPublishableKeyConfigured } from "@/lib/clerk-config";
 
 const SIDEBAR_COOKIE = "aoa_sidebar_state";
 
@@ -46,6 +49,8 @@ export function Sidebar({
     setUserCollapsed(nextState);
     document.cookie = `${SIDEBAR_COOKIE}=${nextState ? "collapsed" : "expanded"}; path=/; max-age=31536000; SameSite=Lax`;
   };
+
+  const clerkConfigured = isClerkPublishableKeyConfigured();
 
   const navItems = [
     {
@@ -96,6 +101,51 @@ export function Sidebar({
             </div>
           )}
         </Link>
+      </div>
+
+      {/* Organization Switcher */}
+      <div
+        className={cn(
+          "border-b border-border",
+          isCollapsed ? "px-2 py-2 flex justify-center" : "px-3 py-2.5"
+        )}
+      >
+        {clerkConfigured ? (
+          <OrganizationSwitcher
+            hidePersonal
+            afterCreateOrganizationUrl="/tasks"
+            afterSelectOrganizationUrl="/tasks"
+            appearance={{
+              elements: {
+                rootBox: isCollapsed ? "w-10 flex justify-center" : "w-full",
+                organizationSwitcherTrigger: isCollapsed
+                  ? "w-10 h-9 justify-center p-1 border border-border rounded-lg bg-zinc-900/60"
+                  : "w-full justify-between rounded-lg border border-border bg-zinc-900/60 px-2.5 py-1.5 text-xs text-foreground hover:bg-accent/60 transition-colors",
+                organizationPreviewTextContainer: isCollapsed
+                  ? "hidden"
+                  : undefined,
+                organizationSwitcherTriggerIcon: isCollapsed
+                  ? "hidden"
+                  : "text-muted-foreground",
+              },
+            }}
+          />
+        ) : (
+          <div
+            className={cn(
+              "flex items-center gap-2 rounded-lg border border-border bg-zinc-900/50 text-xs text-muted-foreground",
+              isCollapsed ? "h-9 w-9 justify-center" : "px-2.5 py-1.5"
+            )}
+            title="Local workspace (Clerk placeholder mode)"
+          >
+            <Building2 className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+            {!isCollapsed && (
+              <span className="truncate font-mono text-[11px]">
+                Local Workspace
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Navigation links */}
@@ -155,25 +205,37 @@ export function Sidebar({
         </div>
       )}
 
-      {/* Sidebar footer and collapse toggle */}
-      <div className="border-t border-border p-2 flex items-center justify-between">
-        {!isCollapsed && (
-          <div className="flex items-center gap-2 pl-2">
-            <ShieldCheck className="h-4 w-4 text-zinc-500" />
-            <span className="text-[11px] text-muted-foreground font-mono">
-              WCAG AA
-            </span>
+      {/* Sidebar footer with UserButton and collapse toggle */}
+      <div className="border-t border-border p-2 flex items-center justify-between gap-2">
+        {clerkConfigured ? (
+          <div
+            className={cn(
+              "flex items-center gap-2 min-w-0",
+              isCollapsed ? "hidden" : "pl-1"
+            )}
+          >
+            <UserButton showName />
           </div>
+        ) : (
+          !isCollapsed && (
+            <div className="flex items-center gap-2 pl-2">
+              <ShieldCheck className="h-4 w-4 text-zinc-500" />
+              <span className="text-[11px] text-muted-foreground font-mono">
+                WCAG AA
+              </span>
+            </div>
+          )
         )}
         <Button
           variant="ghost"
           size="icon"
           onClick={toggleCollapse}
           className={cn(
-            "h-7 w-7 text-muted-foreground hover:text-foreground",
+            "h-7 w-7 text-muted-foreground hover:text-foreground shrink-0",
             isCollapsed && "mx-auto"
           )}
           title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
           {isCollapsed ? (
             <ChevronRight className="h-4 w-4" />

@@ -12,6 +12,7 @@ from httpx import AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.infrastructure.db.repositories.organization_repository import (
     SqlAlchemyOrganizationRepository,
 )
@@ -27,6 +28,19 @@ from app.infrastructure.db.repositories.task_repository import (
 from app.infrastructure.db.repositories.task_run_repository import (
     SqlAlchemyTaskRunRepository,
 )
+from tests.clerk_test_helpers import generate_rsa_keypair, make_clerk_jwt
+
+_PRIV_PEM, _PUB_PEM = generate_rsa_keypair()
+
+
+@pytest.fixture(autouse=True)
+def _configure_clerk_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "CLERK_JWT_KEY", _PUB_PEM)
+
+
+def _auth_headers(clerk_org_id: str) -> dict[str, str]:
+    token = make_clerk_jwt(_PRIV_PEM, clerk_org_id=clerk_org_id)
+    return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.mark.asyncio
@@ -53,8 +67,8 @@ async def test_create_task_happy_path(client: AsyncClient, db_session: AsyncSess
     try:
         response = await client.post(
             "/api/v1/tasks",
+            headers=_auth_headers(org.clerk_org_id),
             json={
-                "org_id": str(org.id),
                 "repo_id": str(repo.id),
                 "title": "Build caching layer",
                 "description": "Implement Redis caching in application layer",
@@ -103,6 +117,7 @@ async def test_create_task_repo_not_found(
     try:
         response = await client.post(
             "/api/v1/tasks",
+            headers=_auth_headers(org.clerk_org_id),
             json={
                 "org_id": str(org.id),
                 "repo_id": str(missing_repo_id),
@@ -125,6 +140,7 @@ async def test_create_task_validation_error(client: AsyncClient):
     """Verify POST /api/v1/tasks returns 422 on invalid request body."""
     response = await client.post(
         "/api/v1/tasks",
+        headers=_auth_headers("org_validation_test"),
         json={
             "org_id": "invalid-uuid",
             "repo_id": "invalid-uuid",
@@ -200,7 +216,10 @@ async def test_get_task_details_with_runs_and_review_iterations(
     await db_session.commit()
 
     try:
-        response = await client.get(f"/api/v1/tasks/{task.id}?org_id={org.id}")
+        response = await client.get(
+            f"/api/v1/tasks/{task.id}",
+            headers=_auth_headers(org.clerk_org_id),
+        )
         assert response.status_code == 200
         data = response.json()
 
@@ -255,18 +274,18 @@ async def test_get_task_details_with_runs_and_review_iterations(
 async def test_get_task_not_found(client: AsyncClient):
     """Verify GET /api/v1/tasks/{id} returns 404 for non-existent task."""
     random_task_id = uuid.uuid4()
-    random_org_id = uuid.uuid4()
     response = await client.get(
-        f"/api/v1/tasks/{random_task_id}?org_id={random_org_id}"
+        f"/api/v1/tasks/{random_task_id}",
+        headers=_auth_headers("org_not_found_test"),
     )
     assert response.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_get_task_wrong_org_returns_404(
+async def test_get_task_wrong_org_returns_403(
     client: AsyncClient, db_session: AsyncSession
 ):
-    """Verify GET /api/v1/tasks/{id} enforces tenant org scoping (AC-1)."""
+    """Verify GET /api/v1/tasks/{id} enforces tenant org scoping (AC-4)."""
     org_repo = SqlAlchemyOrganizationRepository(db_session)
     repo_repo = SqlAlchemyRepositoryRepository(db_session)
     task_repo = SqlAlchemyTaskRepository(db_session)
@@ -298,9 +317,13 @@ async def test_get_task_wrong_org_returns_404(
     await db_session.commit()
 
     try:
-        # Querying task belonging to Org A using Org B must fail with 404
-        response = await client.get(f"/api/v1/tasks/{task.id}?org_id={org_b.id}")
-        assert response.status_code == 404
+        # Querying task belonging to Org A using Org B JWT must fail with 403
+        response = await client.get(
+            f"/api/v1/tasks/{task.id}",
+            headers=_auth_headers(org_b.clerk_org_id),
+        )
+        assert response.status_code == 403
+        assert response.json()["detail"]["code"] == "org_mismatch"
     finally:
         await db_session.execute(
             text("DELETE FROM tasks WHERE repo_id = :rid"), {"rid": repo.id}

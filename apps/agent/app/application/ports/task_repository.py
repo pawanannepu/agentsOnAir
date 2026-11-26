@@ -1,6 +1,7 @@
 """Task repository port protocol."""
 
 import uuid
+from datetime import datetime
 from typing import Protocol
 
 from app.domain.entities.task import Task
@@ -28,6 +29,10 @@ class TaskRepository(Protocol):
         """Retrieve a task scoped to an organization."""
         ...
 
+    async def get_by_id_unscoped(self, task_id: uuid.UUID) -> Task:
+        """Retrieve a task by ID without organization filtering (403 vs 404)."""
+        ...
+
     async def find_active_by_repo_and_issue(
         self, repo_id: uuid.UUID, issue_number: int
     ) -> Task | None:
@@ -49,6 +54,44 @@ class TaskRepository(Protocol):
         pr_number: int | None = None,
     ) -> Task:
         """Update the status and branch/PR coordinates of a task."""
+        ...
+
+    async def set_interruption(
+        self,
+        org_id: uuid.UUID,
+        task_id: uuid.UUID,
+        prompt: str,
+        interruption_type: str = "clarification",
+        options: list | dict | None = None,
+        expires_at: datetime | None = None,
+    ) -> Task:
+        """Transition a task to awaiting_input and store interruption metadata."""
+        ...
+
+    async def clear_interruption(
+        self,
+        org_id: uuid.UUID,
+        task_id: uuid.UUID,
+        new_status: str = "in_progress",
+    ) -> Task:
+        """Clear interruption metadata and update status."""
+        ...
+
+    async def claim_interruption(
+        self,
+        org_id: uuid.UUID,
+        task_id: uuid.UUID,
+        new_status: str = "in_progress",
+    ) -> tuple[Task, str | None]:
+        """Atomically claim an awaiting_input interruption and return (task, prompt)."""
+        ...
+
+    async def claim_abort(
+        self,
+        org_id: uuid.UUID,
+        task_id: uuid.UUID,
+    ) -> Task:
+        """Atomically transition a non-terminal task to cancelled."""
         ...
 
     async def update_pr_details(

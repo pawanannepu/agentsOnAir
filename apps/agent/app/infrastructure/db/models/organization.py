@@ -15,7 +15,9 @@ if TYPE_CHECKING:
     from app.infrastructure.db.models.repository import RepositoryModel
     from app.infrastructure.db.models.sandbox_run import SandboxRunModel
     from app.infrastructure.db.models.task import TaskModel
+    from app.infrastructure.db.models.task_intervention import TaskInterventionModel
     from app.infrastructure.db.models.task_run import TaskRunModel
+    from app.infrastructure.db.models.task_transcript import TaskTranscriptModel
 
 
 class OrganizationModel(Base, TimestampMixin, SoftDeleteMixin):
@@ -90,4 +92,14 @@ class OrganizationModel(Base, TimestampMixin, SoftDeleteMixin):
     audit_logs: Mapped[list["AuditLogModel"]] = relationship(
         "AuditLogModel",
         back_populates="organization",
+    )
+    interventions: Mapped[list["TaskInterventionModel"]] = relationship(
+        "TaskInterventionModel",
+        back_populates="organization",
+        cascade="all, delete-orphan",
+    )
+    transcripts: Mapped[list["TaskTranscriptModel"]] = relationship(
+        "TaskTranscriptModel",
+        back_populates="organization",
+        cascade="all, delete-orphan",
     )

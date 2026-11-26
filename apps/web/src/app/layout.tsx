@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
+import { ClerkProvider } from "@clerk/nextjs";
 import { Geist, Geist_Mono } from "next/font/google";
-import { ConsoleLayout } from "@/components/layout/console-layout";
 import { Toaster } from "@/components/ui/sonner";
+import { isClerkPublishableKeyConfigured } from "@/lib/clerk-config";
+import { CLERK_TASK_URLS, clerkAppearance } from "@/lib/clerk-theme";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -25,15 +27,36 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return (
+  const content = (
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} dark h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">
-        <ConsoleLayout>{children}</ConsoleLayout>
+        {children}
         <Toaster />
       </body>
     </html>
+  );
+
+  if (!isClerkPublishableKeyConfigured()) {
+    return content;
+  }
+
+  return (
+    <ClerkProvider
+      appearance={clerkAppearance}
+      taskUrls={CLERK_TASK_URLS}
+      signInUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL || "/sign-in"}
+      signUpUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL || "/sign-up"}
+      signInFallbackRedirectUrl={
+        process.env.NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL || "/tasks"
+      }
+      signUpFallbackRedirectUrl={
+        process.env.NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL || "/tasks"
+      }
+    >
+      {content}
+    </ClerkProvider>
   );
 }

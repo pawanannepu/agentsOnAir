@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.ports.task_repository import TaskRepository
 from app.domain.entities.task import Task
-from app.domain.exceptions import NotFoundError
+from app.domain.exceptions import ConcurrencyError, NotFoundError
 from app.infrastructure.db.models.repository import RepositoryModel
 from app.infrastructure.db.models.task import TaskModel
 
@@ -30,6 +30,10 @@ def _to_entity(model: TaskModel) -> Task:
         head_commit_sha=model.head_commit_sha,
         pr_review_status=model.pr_review_status,
         created_by_clerk_user_id=model.created_by_clerk_user_id,
+        interruption_prompt=model.interruption_prompt,
+        interruption_type=model.interruption_type,
+        interruption_options=model.interruption_options,
+        interruption_expires_at=model.interruption_expires_at,
         created_at=model.created_at,
         updated_at=model.updated_at,
         deleted_at=model.deleted_at,
@@ -86,7 +90,7 @@ class SqlAlchemyTaskRepository(TaskRepository):
     ) -> Task | None:
         stmt = select(TaskModel).where(
             TaskModel.repo_id == repo_id,
-            TaskModel.status.in_(["queued", "in_progress"]),
+            TaskModel.status.in_(["queued", "in_progress", "awaiting_input"]),
             TaskModel.deleted_at.is_(None),
             TaskModel.trigger_metadata["issue_number"].astext == str(issue_number),
         )
@@ -102,6 +106,16 @@ class SqlAlchemyTaskRepository(TaskRepository):
         model = (await self._session.execute(stmt)).scalar_one_or_none()
         if not model:
             raise NotFoundError(f"Task {task_id} not found in tenant organization")
+        return _to_entity(model)
+
+    async def get_by_id_unscoped(self, task_id: uuid.UUID) -> Task:
+        stmt = select(TaskModel).where(
+            TaskModel.id == task_id,
+            TaskModel.deleted_at.is_(None),
+        )
+        model = (await self._session.execute(stmt)).scalar_one_or_none()
+        if not model:
+            raise NotFoundError(f"Task {task_id} not found")
         return _to_entity(model)
 
     async def list_by_repo(
@@ -151,6 +165,125 @@ class SqlAlchemyTaskRepository(TaskRepository):
             model.branch_name = branch_name
         if pr_number is not None:
             model.pr_number = pr_number
+        model.updated_at = datetime.now(UTC)
+
+        await self._session.flush()
+        return _to_entity(model)
+
+    async def set_interruption(
+        self,
+        org_id: uuid.UUID,
+        task_id: uuid.UUID,
+        prompt: str,
+        interruption_type: str = "clarification",
+        options: list | dict | None = None,
+        expires_at: datetime | None = None,
+    ) -> Task:
+        stmt = select(TaskModel).where(
+            TaskModel.org_id == org_id,
+            TaskModel.id == task_id,
+            TaskModel.deleted_at.is_(None),
+        )
+        model = (await self._session.execute(stmt)).scalar_one_or_none()
+        if not model:
+            raise NotFoundError(f"Task {task_id} not found in tenant organization")
+
+        model.status = "awaiting_input"
+        model.interruption_prompt = prompt
+        model.interruption_type = interruption_type
+        model.interruption_options = options
+        model.interruption_expires_at = expires_at
+        model.updated_at = datetime.now(UTC)
+
+        await self._session.flush()
+        return _to_entity(model)
+
+    async def clear_interruption(
+        self,
+        org_id: uuid.UUID,
+        task_id: uuid.UUID,
+        new_status: str = "in_progress",
+    ) -> Task:
+        stmt = select(TaskModel).where(
+            TaskModel.org_id == org_id,
+            TaskModel.id == task_id,
+            TaskModel.deleted_at.is_(None),
+        )
+        model = (await self._session.execute(stmt)).scalar_one_or_none()
+        if not model:
+            raise NotFoundError(f"Task {task_id} not found in tenant organization")
+
+        model.status = new_status
+        model.interruption_prompt = None
+        model.interruption_type = None
+        model.interruption_options = None
+        model.interruption_expires_at = None
+        model.updated_at = datetime.now(UTC)
+
+        await self._session.flush()
+        return _to_entity(model)
+
+    async def claim_interruption(
+        self,
+        org_id: uuid.UUID,
+        task_id: uuid.UUID,
+        new_status: str = "in_progress",
+    ) -> tuple[Task, str | None]:
+        """Atomically lock and claim an awaiting_input task interruption."""
+        stmt = (
+            select(TaskModel)
+            .where(
+                TaskModel.org_id == org_id,
+                TaskModel.id == task_id,
+                TaskModel.deleted_at.is_(None),
+            )
+            .with_for_update()
+        )
+        model = (await self._session.execute(stmt)).scalar_one_or_none()
+        if not model:
+            raise NotFoundError(f"Task {task_id} not found in tenant organization")
+        if model.status != "awaiting_input":
+            raise ConcurrencyError(
+                f"Task is not awaiting input (current status: {model.status})"
+            )
+
+        prompt_snapshot = model.interruption_prompt
+        model.status = new_status
+        model.interruption_prompt = None
+        model.interruption_type = None
+        model.interruption_options = None
+        model.interruption_expires_at = None
+        model.updated_at = datetime.now(UTC)
+
+        await self._session.flush()
+        return _to_entity(model), prompt_snapshot
+
+    async def claim_abort(
+        self,
+        org_id: uuid.UUID,
+        task_id: uuid.UUID,
+    ) -> Task:
+        """Atomically lock and transition an active task to cancelled."""
+        stmt = (
+            select(TaskModel)
+            .where(
+                TaskModel.org_id == org_id,
+                TaskModel.id == task_id,
+                TaskModel.deleted_at.is_(None),
+            )
+            .with_for_update()
+        )
+        model = (await self._session.execute(stmt)).scalar_one_or_none()
+        if not model:
+            raise NotFoundError(f"Task {task_id} not found in tenant organization")
+        if model.status in ("completed", "failed", "cancelled"):
+            raise ConcurrencyError(f"Task is already in terminal state: {model.status}")
+
+        model.status = "cancelled"
+        model.interruption_prompt = None
+        model.interruption_type = None
+        model.interruption_options = None
+        model.interruption_expires_at = None
         model.updated_at = datetime.now(UTC)
 
         await self._session.flush()

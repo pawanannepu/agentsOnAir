@@ -46,3 +46,15 @@ class BaselineTestFailedError(DomainError):
 
 class ReviewCycleLimitExhaustedError(DomainError):
     """Raised when the outer review loop exhausts its maximum cycle cap."""
+
+
+class AuthenticationError(DomainError):
+    """Raised when caller authentication credentials are missing or invalid."""
+
+
+class ConfigurationError(DomainError):
+    """Raised when a required server secret or provider key is not configured."""
+
+
+class ExternalServiceError(DomainError):
+    """Raised when an upstream external service call fails or times out."""

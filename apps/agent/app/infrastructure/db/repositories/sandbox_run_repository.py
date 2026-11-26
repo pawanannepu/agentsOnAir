@@ -86,6 +86,26 @@ class SqlAlchemySandboxRunRepository(SandboxRunRepository):
             )
         return _to_entity(model)
 
+    async def update_timeout(
+        self,
+        org_id: uuid.UUID,
+        task_run_id: uuid.UUID,
+        timeout_seconds: int,
+    ) -> SandboxRun:
+        stmt = select(SandboxRunModel).where(
+            SandboxRunModel.org_id == org_id,
+            SandboxRunModel.task_run_id == task_run_id,
+        )
+        model = (await self._session.execute(stmt)).scalar_one_or_none()
+        if not model:
+            raise NotFoundError(
+                f"SandboxRun for TaskRun {task_run_id} not found in tenant organization"
+            )
+        model.timeout_seconds = timeout_seconds
+        model.updated_at = datetime.now(UTC)
+        await self._session.flush()
+        return _to_entity(model)
+
     async def record_termination(
         self,
         org_id: uuid.UUID,

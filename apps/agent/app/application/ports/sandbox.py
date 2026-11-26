@@ -53,6 +53,10 @@ class SandboxSession(Protocol):
         """Extract the git unified diff of changes made inside the sandbox."""
         ...
 
+    async def extend_timeout(self, timeout_seconds: int) -> None:
+        """Extend the active sandbox session lifetime timeout."""
+        ...
+
     async def terminate(self) -> None:
         """Terminate and clean up sandbox resources."""
         ...

@@ -7,6 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.dependencies.auth import get_current_clerk_user, resolve_caller_org
+from app.core.clerk_auth import ClerkUserContext
 from app.core.config import settings
 from app.domain.exceptions import ConflictError, NotFoundError
 from app.infrastructure.db.repositories.pr_review_repository import (
@@ -22,7 +24,7 @@ router = APIRouter()
 
 
 class TriggerReviewRequest(BaseModel):
-    org_id: uuid.UUID
+    org_id: uuid.UUID | None = None
 
 
 class ReviewFindingResponse(BaseModel):
@@ -71,13 +73,19 @@ class PRReviewDetailResponse(PRReviewSummaryResponse):
 async def trigger_pr_review(
     repo_id: uuid.UUID,
     pr_number: int,
-    payload: TriggerReviewRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
+    caller: Annotated[ClerkUserContext, Depends(get_current_clerk_user)],
+    payload: TriggerReviewRequest | None = None,
 ):
     """Trigger a full repository context code review for a pull request."""
+    org = await resolve_caller_org(
+        caller,
+        db,
+        requested_org_id=payload.org_id if payload else None,
+    )
     repo_repo = SqlAlchemyRepositoryRepository(db)
     try:
-        repo = await repo_repo.get_by_id(payload.org_id, repo_id)
+        repo = await repo_repo.get_by_id(org.id, repo_id)
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail="Repository not found") from exc
 
@@ -99,7 +107,7 @@ async def trigger_pr_review(
 
     try:
         review = await pr_review_repo.create_review(
-            org_id=payload.org_id,
+            org_id=org.id,
             repo_id=repo_id,
             pr_number=pr_number,
             pr_title=pr_info.get("title", f"PR #{pr_number}"),
@@ -125,15 +133,17 @@ async def trigger_pr_review(
 async def list_pr_reviews(
     repo_id: uuid.UUID,
     pr_number: int,
-    org_id: Annotated[uuid.UUID, Query(...)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    caller: Annotated[ClerkUserContext, Depends(get_current_clerk_user)],
+    org_id: Annotated[uuid.UUID | None, Query()] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
     """List historical reviews for a pull request."""
+    org = await resolve_caller_org(caller, db, requested_org_id=org_id)
     pr_review_repo = SqlAlchemyPRReviewRepository(db)
     reviews, total = await pr_review_repo.list_by_repo_and_pr(
-        org_id=org_id,
+        org_id=org.id,
         repo_id=repo_id,
         pr_number=pr_number,
         page=page,
@@ -177,13 +187,15 @@ async def list_pr_reviews(
 )
 async def get_pr_review_detail(
     review_id: uuid.UUID,
-    org_id: Annotated[uuid.UUID, Query(...)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    caller: Annotated[ClerkUserContext, Depends(get_current_clerk_user)],
+    org_id: Annotated[uuid.UUID | None, Query()] = None,
 ):
     """Retrieve PR review details and structured findings."""
+    org = await resolve_caller_org(caller, db, requested_org_id=org_id)
     pr_review_repo = SqlAlchemyPRReviewRepository(db)
     try:
-        review = await pr_review_repo.get_by_id(org_id, review_id)
+        review = await pr_review_repo.get_by_id(org.id, review_id)
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail="Review not found") from exc
 

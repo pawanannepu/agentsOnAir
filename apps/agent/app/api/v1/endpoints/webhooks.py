@@ -1,15 +1,28 @@
-"""GitHub webhook receiver endpoint."""
+"""GitHub and Clerk webhook receiver endpoints."""
 
+import json
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
+from svix.webhooks import Webhook, WebhookVerificationError
 
 from app.application.use_cases.ingest_github_webhook import (
     IngestGitHubWebhookUseCase,
 )
+from app.application.use_cases.sync_organization import SyncOrganizationUseCase
 from app.core.config import settings
-from app.domain.exceptions import WebhookSignatureError
+from app.domain.exceptions import (
+    ConflictError,
+    ValidationError,
+    WebhookSignatureError,
+)
+from app.infrastructure.db.repositories.audit_log_repository import (
+    SqlAlchemyAuditLogRepository,
+)
+from app.infrastructure.db.repositories.organization_repository import (
+    SqlAlchemyOrganizationRepository,
+)
 from app.infrastructure.db.repositories.pr_review_repository import (
     SqlAlchemyPRReviewRepository,
 )
@@ -23,6 +36,8 @@ from app.infrastructure.db.session import get_db
 from app.infrastructure.github.github_service import GitHubService
 
 router = APIRouter()
+
+PLACEHOLDER_WEBHOOK_SECRETS = {"whsec_placeholder", ""}
 
 
 @router.post("/github")
@@ -72,3 +87,77 @@ async def handle_github_webhook(
         response_data["reason"] = result.reason
 
     return response_data
+
+
+@router.post("/clerk")
+async def handle_clerk_webhook(
+    request: Request,
+    svix_id: Annotated[str | None, Header(alias="svix-id")] = None,
+    svix_timestamp: Annotated[str | None, Header(alias="svix-timestamp")] = None,
+    svix_signature: Annotated[str | None, Header(alias="svix-signature")] = None,
+    db: Annotated[AsyncSession, Depends(get_db)] = None,  # type: ignore[assignment]
+):
+    """Handle incoming Clerk organization lifecycle webhooks verified via Svix."""
+    signing_secret = (settings.CLERK_WEBHOOK_SIGNING_SECRET or "").strip()
+    if not signing_secret or signing_secret in PLACEHOLDER_WEBHOOK_SECRETS:
+        raise HTTPException(
+            status_code=503,
+            detail="Clerk webhook signing secret is not configured",
+        )
+
+    if not svix_id or not svix_timestamp or not svix_signature:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing required Svix verification headers",
+        )
+
+    payload_bytes = await request.body()
+    svix_headers = {
+        "svix-id": svix_id,
+        "svix-timestamp": svix_timestamp,
+        "svix-signature": svix_signature,
+    }
+
+    try:
+        Webhook(signing_secret).verify(payload_bytes, svix_headers)
+    except WebhookVerificationError as exc:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired Clerk webhook signature",
+        ) from exc
+
+    try:
+        payload = json.loads(payload_bytes)
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise HTTPException(status_code=400, detail="Malformed JSON payload") from exc
+
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid Clerk webhook payload")
+
+    event_type = payload.get("type")
+    event_data = payload.get("data")
+    if not isinstance(event_type, str) or not isinstance(event_data, dict):
+        raise HTTPException(
+            status_code=400,
+            detail="Clerk webhook payload must contain 'type' and 'data' fields",
+        )
+
+    org_repo = SqlAlchemyOrganizationRepository(db)
+    audit_repo = SqlAlchemyAuditLogRepository(db)
+    use_case = SyncOrganizationUseCase(org_repo=org_repo, audit_repo=audit_repo)
+
+    try:
+        result = await use_case.sync_from_webhook(
+            event_type=event_type,
+            data=event_data,
+        )
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=exc.message) from exc
+    except ConflictError as exc:
+        raise HTTPException(status_code=409, detail=exc.message) from exc
+
+    await db.commit()
+    return {
+        "status": result.status,
+        "org_id": str(result.org_id) if result.org_id else None,
+    }

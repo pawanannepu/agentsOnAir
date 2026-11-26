@@ -15,9 +15,10 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 2 | Coding standards & tooling | Foundation | in-progress |
 | 3 | Data model | Foundation | in-progress |
 | 4 | Design system & console UI foundation | Foundation | done |
+| 10 | Clerk sign in & organization switcher | Foundation | in-progress |
 | 5 | Core autonomous engineer and reviewer loop | Slice 1 | in-progress |
 | 6 | Full repository context code reviewer | Slice 2 | in-progress |
-| 7 | Live task streaming & interactive collaboration | Slice 3 | planned |
+| 7 | Live task streaming & interactive collaboration | Slice 3 | in-progress |
 | 8 | Guardrails, branch protection & budget limits | Slice 4 | planned |
 | 9 | Custom review rules & feedback learning | Slice 5 | planned |
 
@@ -72,6 +73,21 @@ spec [0003](../specs/0003-design-system-and-console-ui/index.md) · code in `app
 - [x] Review it (fresh model): /check review design system & console UI foundation
 - [x] Document it: /document design system & console UI foundation
 
+### 10. Clerk sign in & organization switcher
+Protect console routes with Clerk authentication, render dark themed sign in and organization switching UI, and synchronize Clerk organizations into PostgreSQL.
+**Done when:** unauthenticated visitors redirect to sign in, signed in users select or create an organization, `org:admin` guards settings, and Clerk organization events plus lazy Backend API sync keep PostgreSQL `organizations` accurate.
+spec [0007](../specs/0007-clerk-sign-in-and-organization-switcher/index.md) · code in `apps/agent/`, `apps/web/`
+- [x] Design it (spec): `/architect clerk sign in & organization switcher`
+- [x] Build it: `/develop clerk sign in & organization switcher`
+  - [x] Core auth route groups, edge proxy, health route, and FastAPI Clerk config (AC-1, AC-2, AC-3)
+  - [x] Svix webhook endpoint and atomic PostgreSQL organization upsert and soft delete (AC-5)
+  - [x] Isolated lazy Clerk Backend API fallback sync, structured 403 errors, and org:admin guard (AC-4, AC-6)
+  - [x] Protected console pages, sign in and onboarding UI, sidebar OrganizationSwitcher, and 403 recovery prompt (AC-1, AC-2, AC-3, AC-4, AC-7)
+- [ ] Verify it: `/check verify clerk sign in & organization switcher`
+- [ ] Test it: `/test clerk sign in & organization switcher`
+- [ ] Review it (fresh model): `/check review clerk sign in & organization switcher`
+- [ ] Document it: `/document clerk sign in & organization switcher`
+
 ## Slice 1: Core autonomous engineer and reviewer loop
 
 ### 5. Core autonomous engineer and reviewer loop
@@ -111,10 +127,21 @@ spec [0005](../specs/0005-full-repository-context-code-reviewer/index.md) · cod
 
 ## Slice 3: Live task streaming & interactive collaboration
 
-### 7. Live task streaming & interactive collaboration · needs a decision
+### 7. Live task streaming & interactive collaboration
 Stream live sandbox logs and agent decisions to the web console, allowing developers to answer questions mid task, give guidance, or take over execution.
 **Done when:** developers can watch live task execution in the web console, send instructions while the agent runs, and take control when needed.
-- [ ] Design it (spec): `/architect live task streaming & interactive collaboration`
+spec [0006](../specs/0006-live-task-streaming-and-interactive-collaboration/index.md) · code in `apps/agent/`, `apps/web/`
+- [x] Design it (spec): `/architect live task streaming & interactive collaboration`
+- [x] Build it: /develop live task streaming & interactive collaboration
+  - [x] Database migration for task interruption state, task_interventions, and task_transcripts (AC-1, AC-4)
+  - [x] Redis Streams event appender, in flight log reader, and post task completion transcript archiver (AC-1, AC-5)
+  - [x] FastAPI Server Sent Events endpoint with Last-Event-ID cursor replay and keep alive ping comments (AC-1)
+  - [x] LangGraph human in the loop interrupt state machine, E2B timeout extension, and delayed queue watchdog (AC-4)
+  - [x] Web console useTaskStream hook, split pane execution inspector, and REST intervention endpoints (AC-2, AC-3, AC-4)
+- [x] Verify it: /check verify live task streaming & interactive collaboration
+- [x] Test it: /test live task streaming & interactive collaboration
+- [x] Review it (fresh model): /check review live task streaming & interactive collaboration
+- [x] Document it: /document live task streaming & interactive collaboration
 
 ## Slice 4: Guardrails, branch protection & budget limits
 

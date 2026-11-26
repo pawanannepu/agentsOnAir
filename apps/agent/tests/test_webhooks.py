@@ -18,6 +18,9 @@ from app.infrastructure.db.repositories.organization_repository import (
 from app.infrastructure.db.repositories.repository_repository import (
     SqlAlchemyRepositoryRepository,
 )
+from tests.clerk_test_helpers import generate_rsa_keypair, make_clerk_jwt
+
+_PRIV_PEM, _PUB_PEM = generate_rsa_keypair()
 
 
 def _sign_payload(
@@ -142,7 +145,16 @@ async def test_webhook_issues_opened_happy_path_and_duplicate(
         assert data2["task_id"] == task_id
 
         # 3. Verify task details endpoint
-        task_res = await client.get(f"/api/v1/tasks/{task_id}?org_id={org.id}")
+        token = make_clerk_jwt(_PRIV_PEM, clerk_org_id=org.clerk_org_id)
+        old_key = settings.CLERK_JWT_KEY
+        settings.CLERK_JWT_KEY = _PUB_PEM
+        try:
+            task_res = await client.get(
+                f"/api/v1/tasks/{task_id}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        finally:
+            settings.CLERK_JWT_KEY = old_key
         assert task_res.status_code == 200
         task_detail = task_res.json()
         assert task_detail["id"] == task_id

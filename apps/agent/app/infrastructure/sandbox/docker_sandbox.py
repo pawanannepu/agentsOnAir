@@ -22,11 +22,14 @@ class DockerSandboxSession(SandboxSession):
         sandbox_id: str,
         workspace_dir: str,
         container_name: str | None = None,
+        timeout_seconds: int = 600,
     ) -> None:
         self._id = sandbox_id
         self._workspace_dir = workspace_dir
         self._container_name = container_name
         self._active = True
+        self._timeout_seconds = timeout_seconds
+        self._timeout_extensions: list[int] = []
 
     @property
     def id(self) -> str:
@@ -112,6 +115,16 @@ class DockerSandboxSession(SandboxSession):
         if not res.stdout.strip():
             res = await self.execute_command("git diff")
         return res.stdout
+
+    @property
+    def timeout_seconds(self) -> int:
+        return self._timeout_seconds
+
+    async def extend_timeout(self, timeout_seconds: int) -> None:
+        if not self._active:
+            raise RuntimeError("Sandbox session has been terminated")
+        self._timeout_seconds = timeout_seconds
+        self._timeout_extensions.append(timeout_seconds)
 
     async def terminate(self) -> None:
         if self._active:

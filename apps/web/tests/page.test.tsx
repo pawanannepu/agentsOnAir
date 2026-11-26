@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import HomePage from "../src/app/page";
+import { HomeView as HomePage } from "../src/app/(console)/home-view";
 
 describe("HomePage console overview component (AC-1, AC-6)", () => {
   it("renders mission control heading and platform description", () => {

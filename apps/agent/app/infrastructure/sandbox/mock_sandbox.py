@@ -17,10 +17,14 @@ from app.application.ports.sandbox import (
 class MockSandboxSession(SandboxSession):
     """Local filesystem sandbox session with real command execution."""
 
-    def __init__(self, sandbox_id: str, workspace_dir: str) -> None:
+    def __init__(
+        self, sandbox_id: str, workspace_dir: str, timeout_seconds: int = 600
+    ) -> None:
         self._id = sandbox_id
         self._workspace_dir = workspace_dir
         self._active = True
+        self._timeout_seconds = timeout_seconds
+        self._timeout_extensions: list[int] = []
 
     @property
     def id(self) -> str:
@@ -113,6 +117,20 @@ class MockSandboxSession(SandboxSession):
             res = await self.execute_command("git diff")
         return res.stdout
 
+    @property
+    def timeout_seconds(self) -> int:
+        return self._timeout_seconds
+
+    @property
+    def timeout_extensions(self) -> list[int]:
+        return list(self._timeout_extensions)
+
+    async def extend_timeout(self, timeout_seconds: int) -> None:
+        if not self._active:
+            raise RuntimeError("Sandbox session has been terminated")
+        self._timeout_seconds = timeout_seconds
+        self._timeout_extensions.append(timeout_seconds)
+
     async def terminate(self) -> None:
         if self._active:
             self._active = False
@@ -133,7 +151,9 @@ class MockSandboxProvider(SandboxProvider):
         temp_dir = tempfile.mkdtemp(prefix=f"aon_sbx_{task_id.hex[:6]}_")
 
         # Initialize bare-minimum git workspace
-        session = MockSandboxSession(sandbox_id, temp_dir)
+        session = MockSandboxSession(
+            sandbox_id, temp_dir, timeout_seconds=timeout_seconds
+        )
         await session.execute_command("git init")
         await session.execute_command("git config user.name 'agentsonair[bot]'")
         await session.execute_command("git config user.email 'bot@agentsonair.dev'")

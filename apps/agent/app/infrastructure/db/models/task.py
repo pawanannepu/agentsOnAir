@@ -1,9 +1,19 @@
 """Task declarative model."""
 
 import uuid
+from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Index, Integer, String, Text, text
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -12,7 +22,9 @@ from app.infrastructure.db.base import Base, SoftDeleteMixin, TimestampMixin, uu
 if TYPE_CHECKING:
     from app.infrastructure.db.models.organization import OrganizationModel
     from app.infrastructure.db.models.repository import RepositoryModel
+    from app.infrastructure.db.models.task_intervention import TaskInterventionModel
     from app.infrastructure.db.models.task_run import TaskRunModel
+    from app.infrastructure.db.models.task_transcript import TaskTranscriptModel
 
 
 class TaskModel(Base, TimestampMixin, SoftDeleteMixin):
@@ -91,8 +103,29 @@ class TaskModel(Base, TimestampMixin, SoftDeleteMixin):
         String(255),
         nullable=True,
     )
+    interruption_prompt: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    interruption_type: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+    interruption_options: Mapped[dict | list | None] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
+    interruption_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
 
     __table_args__ = (
+        CheckConstraint(
+            "status IN ('queued', 'in_progress', 'awaiting_input', "
+            "'completed', 'failed', 'cancelled')",
+            name="ck_tasks_status",
+        ),
         Index(
             "ix_tasks_org_status_created",
             "org_id",
@@ -110,7 +143,8 @@ class TaskModel(Base, TimestampMixin, SoftDeleteMixin):
             text("(trigger_metadata->>'issue_number')"),
             unique=True,
             postgresql_where=text(
-                "status IN ('queued', 'in_progress') AND deleted_at IS NULL"
+                "status IN ('queued', 'in_progress', 'awaiting_input') "
+                "AND deleted_at IS NULL"
             ),
         ),
     )
@@ -125,6 +159,16 @@ class TaskModel(Base, TimestampMixin, SoftDeleteMixin):
     )
     task_runs: Mapped[list["TaskRunModel"]] = relationship(
         "TaskRunModel",
+        back_populates="task",
+        cascade="all, delete-orphan",
+    )
+    interventions: Mapped[list["TaskInterventionModel"]] = relationship(
+        "TaskInterventionModel",
+        back_populates="task",
+        cascade="all, delete-orphan",
+    )
+    transcripts: Mapped[list["TaskTranscriptModel"]] = relationship(
+        "TaskTranscriptModel",
         back_populates="task",
         cascade="all, delete-orphan",
     )

@@ -1,3 +1,6 @@
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,6 +20,45 @@ class Settings(BaseSettings):
     ]
 
     DATABASE_URL: str = "postgresql+asyncpg://localhost:5432/agentsonair"
+
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def _normalize_database_url(cls, value: str) -> str:
+        """Ensure PostgreSQL URLs use the asyncpg driver and compatible query args."""
+        if not isinstance(value, str):
+            return value
+        parsed = urlparse(value)
+        scheme = parsed.scheme
+        if scheme in ("postgres", "postgresql"):
+            scheme = "postgresql+asyncpg"
+        elif scheme != "postgresql+asyncpg":
+            return value
+
+        raw_params = parse_qsl(parsed.query, keep_blank_values=True)
+        has_ssl = any(k == "ssl" for k, _ in raw_params)
+        sslmode = next((v for k, v in raw_params if k == "sslmode"), None)
+        filtered = [
+            (k, v) for k, v in raw_params if k not in ("sslmode", "channel_binding")
+        ]
+        if not has_ssl and sslmode in (
+            "require",
+            "verify-ca",
+            "verify-full",
+            "prefer",
+        ):
+            filtered.append(("ssl", "require"))
+
+        return urlunparse(
+            (
+                scheme,
+                parsed.netloc,
+                parsed.path,
+                parsed.params,
+                urlencode(filtered),
+                parsed.fragment,
+            )
+        )
+
     # Default 32-byte key base64-encoded for development/testing
     CREDENTIALS_ENCRYPTION_KEY: str = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
 
@@ -34,6 +76,15 @@ class Settings(BaseSettings):
     # Model providers
     ANTHROPIC_API_KEY: str | None = None
     OPENAI_API_KEY: str | None = None
+
+    # Clerk authentication
+    CLERK_SECRET_KEY: str | None = None
+    CLERK_ISSUER_URL: str | None = None
+    CLERK_JWT_KEY: str | None = None
+    CLERK_WEBHOOK_SIGNING_SECRET: str | None = None
+
+    # Interruption watchdog timeout (15 minutes)
+    INTERRUPTION_TIMEOUT_SECONDS: int = 900
 
     # Redis telemetry and pubsub
     REDIS_URL: str = "redis://localhost:6379/0"

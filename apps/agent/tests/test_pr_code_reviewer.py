@@ -123,6 +123,12 @@ class InMemoryTaskRepository(TaskRepository):
             raise NotFoundError("Task not found")
         return t
 
+    async def get_by_id_unscoped(self, task_id: uuid.UUID) -> Task:
+        t = self.tasks.get(task_id)
+        if not t:
+            raise NotFoundError("Task not found")
+        return t
+
     async def find_active_by_repo_and_issue(
         self, repo_id: uuid.UUID, issue_number: int
     ) -> Task | None:
@@ -169,6 +175,55 @@ class InMemoryTaskRepository(TaskRepository):
 
     async def soft_delete(self, org_id: uuid.UUID, task_id: uuid.UUID) -> None:
         pass
+
+    async def set_interruption(
+        self,
+        org_id: uuid.UUID,
+        task_id: uuid.UUID,
+        prompt: str,
+        interruption_type: str = "clarification",
+        options: list | dict | None = None,
+        expires_at=None,
+    ) -> Task:
+        t = await self.get_by_id(org_id, task_id)
+        t.status = "awaiting_input"
+        t.interruption_prompt = prompt
+        t.interruption_type = interruption_type
+        t.interruption_options = options
+        t.interruption_expires_at = expires_at
+        return t
+
+    async def clear_interruption(
+        self,
+        org_id: uuid.UUID,
+        task_id: uuid.UUID,
+        new_status: str = "in_progress",
+    ) -> Task:
+        t = await self.get_by_id(org_id, task_id)
+        t.status = new_status
+        t.interruption_prompt = None
+        return t
+
+    async def claim_interruption(
+        self,
+        org_id: uuid.UUID,
+        task_id: uuid.UUID,
+        new_status: str = "in_progress",
+    ) -> tuple[Task, str | None]:
+        t = await self.get_by_id(org_id, task_id)
+        prompt = t.interruption_prompt
+        t.status = new_status
+        t.interruption_prompt = None
+        return t, prompt
+
+    async def claim_abort(
+        self,
+        org_id: uuid.UUID,
+        task_id: uuid.UUID,
+    ) -> Task:
+        t = await self.get_by_id(org_id, task_id)
+        t.status = "cancelled"
+        return t
 
 
 class InMemoryPRReviewRepository(PRReviewRepository):
@@ -1179,6 +1234,15 @@ async def test_reviews_api_endpoints_integration(
     pr_num = 123
 
     # Mock GitHubService for trigger endpoint
+    from app.core.config import settings
+    from tests.clerk_test_helpers import generate_rsa_keypair, make_clerk_jwt
+
+    priv_pem, pub_pem = generate_rsa_keypair()
+    token = make_clerk_jwt(priv_pem, clerk_org_id=org.clerk_org_id)
+    auth_headers = {"Authorization": f"Bearer {token}"}
+    old_key = settings.CLERK_JWT_KEY
+    settings.CLERK_JWT_KEY = pub_pem
+
     with (
         patch(
             "app.api.v1.endpoints.reviews.GitHubService.get_installation_token",
@@ -1197,50 +1261,55 @@ async def test_reviews_api_endpoints_integration(
             ),
         ),
     ):
-        # 1. Trigger review returns 200 with review id
-        res = await client.post(
-            f"/api/v1/repos/{repo.id}/pulls/{pr_num}/reviews",
-            json={"org_id": str(org.id)},
-        )
-        assert res.status_code == 200
-        review_data = res.json()
-        assert review_data["status"] == "pending"
-        assert review_data["pr_number"] == pr_num
-        review_id = review_data["id"]
+        try:
+            # 1. Trigger review returns 200 with review id
+            res = await client.post(
+                f"/api/v1/repos/{repo.id}/pulls/{pr_num}/reviews",
+                headers=auth_headers,
+                json={"org_id": str(org.id)},
+            )
+            assert res.status_code == 200
+            review_data = res.json()
+            assert review_data["status"] == "pending"
+            assert review_data["pr_number"] == pr_num
+            review_id = review_data["id"]
 
-        # 2. Trigger duplicate review while active returns 409 Conflict
-        res_dup = await client.post(
-            f"/api/v1/repos/{repo.id}/pulls/{pr_num}/reviews",
-            json={"org_id": str(org.id)},
-        )
-        assert res_dup.status_code == 409
-        assert "active review already exists" in res_dup.json()["detail"].lower()
+            # 2. Trigger duplicate review while active returns 409 Conflict
+            res_dup = await client.post(
+                f"/api/v1/repos/{repo.id}/pulls/{pr_num}/reviews",
+                headers=auth_headers,
+                json={"org_id": str(org.id)},
+            )
+            assert res_dup.status_code == 409
+            assert "active review already exists" in res_dup.json()["detail"].lower()
 
-        # 3. List reviews for PR returns reviews list
-        res_list = await client.get(
-            f"/api/v1/repos/{repo.id}/pulls/{pr_num}/reviews",
-            params={"org_id": str(org.id)},
-        )
-        assert res_list.status_code == 200
-        list_data = res_list.json()
-        assert list_data["total"] >= 1
-        assert list_data["items"][0]["id"] == review_id
+            # 3. List reviews for PR returns reviews list
+            res_list = await client.get(
+                f"/api/v1/repos/{repo.id}/pulls/{pr_num}/reviews",
+                headers=auth_headers,
+            )
+            assert res_list.status_code == 200
+            list_data = res_list.json()
+            assert list_data["total"] >= 1
+            assert list_data["items"][0]["id"] == review_id
 
-        # 4. Get review detail returns review and findings
-        res_detail = await client.get(
-            f"/api/v1/reviews/{review_id}",
-            params={"org_id": str(org.id)},
-        )
-        assert res_detail.status_code == 200
-        detail_data = res_detail.json()
-        assert detail_data["id"] == review_id
-        assert detail_data["pr_title"] == "Add analytics"
-        assert isinstance(detail_data["findings"], list)
+            # 4. Get review detail returns review and findings
+            res_detail = await client.get(
+                f"/api/v1/reviews/{review_id}",
+                headers=auth_headers,
+            )
+            assert res_detail.status_code == 200
+            detail_data = res_detail.json()
+            assert detail_data["id"] == review_id
+            assert detail_data["pr_title"] == "Add analytics"
+            assert isinstance(detail_data["findings"], list)
 
-        # 5. Non existent review returns 404 Not Found
-        non_existent_id = uuid.uuid4()
-        res_404 = await client.get(
-            f"/api/v1/reviews/{non_existent_id}",
-            params={"org_id": str(org.id)},
-        )
-        assert res_404.status_code == 404
+            # 5. Non existent review returns 404 Not Found
+            non_existent_id = uuid.uuid4()
+            res_404 = await client.get(
+                f"/api/v1/reviews/{non_existent_id}",
+                headers=auth_headers,
+            )
+            assert res_404.status_code == 404
+        finally:
+            settings.CLERK_JWT_KEY = old_key

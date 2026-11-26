@@ -4,6 +4,7 @@ import * as React from "react";
 import { Sidebar } from "./sidebar";
 import { Header } from "./header";
 import { BreadcrumbProvider } from "./breadcrumb-context";
+import { OrgRecoveryDialog } from "./org-recovery-dialog";
 import { CommandDialog } from "@/components/ui/command-dialog";
 
 export interface ConsoleLayoutProps {
@@ -51,6 +52,9 @@ export function ConsoleLayout({
 
         {/* Global Command Dialog */}
         <CommandDialog open={commandOpen} onOpenChange={setCommandOpen} />
+
+        {/* Global 403 Organization Recovery Prompt */}
+        <OrgRecoveryDialog />
       </div>
     </BreadcrumbProvider>
   );

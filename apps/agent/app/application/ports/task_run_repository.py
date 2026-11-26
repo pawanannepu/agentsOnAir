@@ -17,6 +17,18 @@ class TaskRunRepository(Protocol):
         """Retrieve an execution run by ID scoped to tenant."""
         ...
 
+    async def get_latest_by_task(
+        self, org_id: uuid.UUID, task_id: uuid.UUID
+    ) -> TaskRun:
+        """Retrieve the most recent execution run for a task."""
+        ...
+
+    async def set_status(
+        self, org_id: uuid.UUID, task_run_id: uuid.UUID, status: str
+    ) -> TaskRun:
+        """Update execution run status without completing the run."""
+        ...
+
     async def update_checkpoint(
         self,
         org_id: uuid.UUID,

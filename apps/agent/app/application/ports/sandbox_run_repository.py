@@ -27,6 +27,15 @@ class SandboxRunRepository(Protocol):
         """Retrieve sandbox session details for an execution run."""
         ...
 
+    async def update_timeout(
+        self,
+        org_id: uuid.UUID,
+        task_run_id: uuid.UUID,
+        timeout_seconds: int,
+    ) -> SandboxRun:
+        """Update recorded timeout_seconds for an active sandbox session."""
+        ...
+
     async def record_termination(
         self,
         org_id: uuid.UUID,

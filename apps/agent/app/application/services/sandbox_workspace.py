@@ -28,6 +28,14 @@ class SandboxWorkspace:
         if self.event_streamer:
             await self.event_streamer.stream_event(self.channel, event_type, data)
 
+    async def _emit_log(self, chunk: str, stream: str = "stdout") -> None:
+        if self.event_streamer and chunk:
+            await self.event_streamer.append_event(
+                self.task_id,
+                "task.log",
+                {"stream": stream, "chunk": chunk},
+            )
+
     async def init_workspace(
         self,
         repo_url_with_read_token: str | None,
@@ -39,6 +47,10 @@ class SandboxWorkspace:
             "workspace_init_started",
             {"base_branch": base_branch, "work_branch": work_branch},
         )
+        await self._emit_log(
+            f"\u001b[34m[workspace:init]\u001b[0m Initializing workspace "
+            f"(base: {base_branch}, work: {work_branch})...\n"
+        )
 
         if repo_url_with_read_token:
             # Clone repo using read-only token
@@ -48,7 +60,6 @@ class SandboxWorkspace:
             )
             clone_res = await self.session.execute_command(clone_cmd)
             if clone_res.exit_code != 0:
-                # If branch checkout failed, clone default and switch
                 await self.session.execute_command(
                     f"git clone --depth 50 {repo_url_with_read_token} ."
                 )
@@ -66,22 +77,32 @@ class SandboxWorkspace:
             "workspace_init_completed",
             {"work_branch": work_branch, "status": "ready"},
         )
+        await self._emit_log(
+            f"\u001b[32m[workspace:ready]\u001b[0m Branch {work_branch} "
+            f"checked out and ready.\n"
+        )
 
     async def run_baseline_tests(
         self, test_command: str, timeout_seconds: int = 120
     ) -> SandboxExecutionResult:
-        """Run repository test suite on base branch before edits (AC-3).
-
-        If baseline tests fail, aborts early with BaselineTestFailedError.
-        """
+        """Run repository test suite on base branch before edits (AC-3)."""
         await self._stream(
             "baseline_test_started",
             {"command": test_command, "timeout": timeout_seconds},
+        )
+        await self._emit_log(
+            f"\u001b[33m[baseline:test]\u001b[0m Running baseline tests: "
+            f"{test_command}\n"
         )
 
         result = await self.session.execute_command(
             test_command, timeout_seconds=timeout_seconds
         )
+
+        if result.stdout:
+            await self._emit_log(result.stdout, "stdout")
+        if result.stderr:
+            await self._emit_log(result.stderr, "stderr")
 
         await self._stream(
             "baseline_test_completed",
@@ -111,6 +132,9 @@ class SandboxWorkspace:
         """Tool: write file to workspace."""
         await self.session.write_file(path, content)
         await self._stream("tool_write_file", {"path": path, "bytes": len(content)})
+        await self._emit_log(
+            f"\u001b[35m[tool:edit]\u001b[0m Modified {path} ({len(content)} bytes)\n"
+        )
         return f"Successfully wrote {len(content)} bytes to {path}"
 
     async def run_test(
@@ -121,9 +145,17 @@ class SandboxWorkspace:
             "tool_run_test_started",
             {"command": command, "timeout": timeout_seconds},
         )
+        await self._emit_log(f"\u001b[33m[tool:test]\u001b[0m $ {command}\n")
+
         result = await self.session.execute_command(
             command, timeout_seconds=timeout_seconds
         )
+
+        if result.stdout:
+            await self._emit_log(result.stdout, "stdout")
+        if result.stderr:
+            await self._emit_log(result.stderr, "stderr")
+
         await self._stream(
             "tool_run_test_completed",
             {
@@ -143,9 +175,17 @@ class SandboxWorkspace:
             "tool_run_command_started",
             {"command": command, "timeout": timeout_seconds},
         )
+        await self._emit_log(f"\u001b[36m[tool:bash]\u001b[0m $ {command}\n")
+
         result = await self.session.execute_command(
             command, timeout_seconds=timeout_seconds
         )
+
+        if result.stdout:
+            await self._emit_log(result.stdout, "stdout")
+        if result.stderr:
+            await self._emit_log(result.stderr, "stderr")
+
         await self._stream(
             "tool_run_command_completed",
             {

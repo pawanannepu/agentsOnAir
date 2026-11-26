@@ -24,6 +24,10 @@ class Task:
     head_commit_sha: str | None = None
     pr_review_status: str | None = None
     created_by_clerk_user_id: str | None = None
+    interruption_prompt: str | None = None
+    interruption_type: str | None = None
+    interruption_options: list | dict | None = None
+    interruption_expires_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
     deleted_at: datetime | None = None

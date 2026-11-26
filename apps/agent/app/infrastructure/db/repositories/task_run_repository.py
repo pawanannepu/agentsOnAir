@@ -86,6 +86,42 @@ class SqlAlchemyTaskRunRepository(TaskRunRepository):
             )
         return _to_entity(model)
 
+    async def get_latest_by_task(
+        self, org_id: uuid.UUID, task_id: uuid.UUID
+    ) -> TaskRun:
+        stmt = (
+            select(TaskRunModel)
+            .where(
+                TaskRunModel.org_id == org_id,
+                TaskRunModel.task_id == task_id,
+            )
+            .order_by(TaskRunModel.run_number.desc())
+            .limit(1)
+        )
+        model = (await self._session.execute(stmt)).scalar_one_or_none()
+        if not model:
+            raise NotFoundError(
+                f"TaskRun for Task {task_id} not found in tenant organization"
+            )
+        return _to_entity(model)
+
+    async def set_status(
+        self, org_id: uuid.UUID, task_run_id: uuid.UUID, status: str
+    ) -> TaskRun:
+        stmt = select(TaskRunModel).where(
+            TaskRunModel.org_id == org_id,
+            TaskRunModel.id == task_run_id,
+        )
+        model = (await self._session.execute(stmt)).scalar_one_or_none()
+        if not model:
+            raise NotFoundError(
+                f"TaskRun {task_run_id} not found in tenant organization"
+            )
+        model.status = status
+        model.updated_at = datetime.now(UTC)
+        await self._session.flush()
+        return _to_entity(model)
+
     async def update_checkpoint(
         self,
         org_id: uuid.UUID,
