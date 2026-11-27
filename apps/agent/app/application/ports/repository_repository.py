@@ -46,3 +46,9 @@ class RepositoryRepository(Protocol):
     async def soft_delete(self, org_id: uuid.UUID, repo_id: uuid.UUID) -> None:
         """Soft delete a repository by setting deleted_at."""
         ...
+
+    async def update_config(
+        self, org_id: uuid.UUID, repo_id: uuid.UUID, config: dict
+    ) -> Repository:
+        """Update JSONB config for an active repository."""
+        ...

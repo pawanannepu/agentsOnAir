@@ -7,11 +7,13 @@ import { TaskDetailClient } from "./task-detail-client";
 export interface ClerkTaskDetailProps {
   taskId: string;
   initialOrgId?: string;
+  isAdmin?: boolean;
 }
 
 export function ClerkTaskDetail({
   taskId,
   initialOrgId,
+  isAdmin = false,
 }: ClerkTaskDetailProps) {
   const { getToken, orgId } = useAuth();
   const resolvedOrgId = initialOrgId || orgId || undefined;
@@ -24,6 +26,7 @@ export function ClerkTaskDetail({
     <TaskDetailClient
       taskId={taskId}
       orgId={resolvedOrgId}
+      isAdmin={isAdmin}
       getToken={memoizedGetToken}
     />
   );

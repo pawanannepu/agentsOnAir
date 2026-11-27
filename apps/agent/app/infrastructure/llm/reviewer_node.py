@@ -36,13 +36,22 @@ class ReviewEngineResult:
     findings: list[dict]
     blocking_count: int
     non_blocking_count: int
+    provider: str = "anthropic"
+    model: str = "claude-sonnet-4"
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
 
 
 class CodeReviewAnalyzerNode:
     """Invokes Claude Sonnet with structured finding schema and resolves verdict."""
 
-    def __init__(self, api_key: str | None = None) -> None:
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str = "claude-sonnet-4",
+    ) -> None:
         self.api_key = api_key
+        self.model = model
 
     def resolve_verdict(
         self,
@@ -123,6 +132,11 @@ class CodeReviewAnalyzerNode:
             )
 
         summary = "\n".join(summary_parts)
+        prompt_tokens = max(
+            300,
+            (len(tier1_diff_context) + len(tier2_symbol_context)) // 4 + 200,
+        )
+        completion_tokens = max(100, len(summary) // 4 + len(validated_findings) * 40)
 
         return ReviewEngineResult(
             verdict=verdict,
@@ -130,4 +144,8 @@ class CodeReviewAnalyzerNode:
             findings=validated_findings,
             blocking_count=blocking_count,
             non_blocking_count=non_blocking_count,
+            provider="anthropic",
+            model=self.model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
         )

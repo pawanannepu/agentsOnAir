@@ -1,5 +1,6 @@
 """GitHub gateway port protocol."""
 
+from collections.abc import Sequence
 from typing import Protocol
 
 
@@ -19,6 +20,8 @@ class GitHubGateway(Protocol):
         commit_message: str,
         token: str,
         diff_text: str | None = None,
+        protected_branches: Sequence[str] | None = None,
+        force: bool = False,
     ) -> str:
         """Push work branch to GitHub and return commit SHA."""
         ...
@@ -31,6 +34,7 @@ class GitHubGateway(Protocol):
         title: str,
         body: str,
         token: str,
+        protected_branches: Sequence[str] | None = None,
     ) -> dict[str, str | int]:
         """Open a pull request on GitHub."""
         ...

@@ -1,6 +1,7 @@
 """Sandbox port interfaces and data transfer objects."""
 
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -57,6 +58,14 @@ class SandboxSession(Protocol):
         """Extend the active sandbox session lifetime timeout."""
         ...
 
+    async def restrict_network(
+        self,
+        mode: str,
+        allowed_domains: Sequence[str] | None = None,
+    ) -> None:
+        """Apply post-install network egress restrictions to the sandbox."""
+        ...
+
     async def terminate(self) -> None:
         """Terminate and clean up sandbox resources."""
         ...
@@ -71,6 +80,8 @@ class SandboxProvider(Protocol):
         task_id: uuid.UUID,
         memory_limit_mb: int = 2048,
         timeout_seconds: int = 600,
+        network_egress_mode: str = "off_after_install",
+        allowed_egress_domains: Sequence[str] | None = None,
     ) -> SandboxSession:
         """Provision a new isolated sandbox session."""
         ...

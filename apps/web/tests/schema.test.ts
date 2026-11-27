@@ -3,11 +3,14 @@ import { getTableName } from "drizzle-orm";
 import {
   auditLogs,
   credentials,
+  orgMonthlyUsage,
   organizations,
   repositories,
   sandboxRuns,
+  taskApprovals,
   taskRuns,
   tasks,
+  usageEvents,
 } from "@/db/schema";
 
 describe("Drizzle ORM schema definitions (covers: AC-1, AC-2, AC-5, AC-6, AC-7)", () => {
@@ -103,5 +106,33 @@ describe("Drizzle ORM schema definitions (covers: AC-1, AC-2, AC-5, AC-6, AC-7)"
     expect(auditLogs.targetId).toBeDefined();
     expect(auditLogs.payloadBefore).toBeDefined();
     expect(auditLogs.payloadAfter).toBeDefined();
+  });
+
+  it("exports guardrail approvals, usage events, monthly usage, and taskRuns.pausedSeconds (covers: AC-1, AC-3, AC-5, AC-6)", () => {
+    expect(taskRuns.pausedSeconds).toBeDefined();
+
+    expect(getTableName(taskApprovals)).toBe("task_approvals");
+    expect(taskApprovals.status).toBeDefined();
+    expect(taskApprovals.riskCategory).toBeDefined();
+    expect(taskApprovals.actionType).toBeDefined();
+    expect(taskApprovals.actionHash).toBeDefined();
+    expect(taskApprovals.actionSummary).toBeDefined();
+    expect(taskApprovals.actionPayload).toBeDefined();
+    expect(taskApprovals.consumedAt).toBeDefined();
+    expect(taskApprovals.decidedByClerkUserId).toBeDefined();
+    expect(taskApprovals.expiresAt).toBeDefined();
+
+    expect(getTableName(usageEvents)).toBe("usage_events");
+    expect(usageEvents.taskRunId).toBeDefined();
+    expect(usageEvents.prReviewId).toBeDefined();
+    expect(usageEvents.provider).toBeDefined();
+    expect(usageEvents.model).toBeDefined();
+    expect(usageEvents.operationType).toBeDefined();
+    expect(usageEvents.estimatedCostCents).toBeDefined();
+
+    expect(getTableName(orgMonthlyUsage)).toBe("org_monthly_usage");
+    expect(orgMonthlyUsage.billingMonth).toBeDefined();
+    expect(orgMonthlyUsage.totalTokens).toBeDefined();
+    expect(orgMonthlyUsage.totalCostCents).toBeDefined();
   });
 });

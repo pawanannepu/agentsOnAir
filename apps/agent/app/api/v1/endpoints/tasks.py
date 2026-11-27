@@ -1,13 +1,14 @@
-"""Tasks API endpoints."""
+"""Tasks, streaming, interventions, and approval gate API endpoints."""
 
 import gzip
 import json
 import uuid
-from typing import Annotated
+from datetime import UTC, datetime
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.event import ServerSentEvent
 from sse_starlette.sse import EventSourceResponse
@@ -15,10 +16,13 @@ from sse_starlette.sse import EventSourceResponse
 from app.api.dependencies.auth import (
     authorize_task_org,
     get_current_clerk_user,
+    require_org_admin,
     resolve_caller_org,
 )
 from app.core.clerk_auth import ClerkUserContext
+from app.domain.entities.organization import Organization
 from app.domain.exceptions import ConcurrencyError, NotFoundError
+from app.domain.services.policy_evaluator import PolicyEvaluator
 from app.infrastructure.db.models.repository import RepositoryModel
 from app.infrastructure.db.models.sandbox_run import SandboxRunModel
 from app.infrastructure.db.models.task_run import TaskRunModel
@@ -27,6 +31,9 @@ from app.infrastructure.db.repositories.audit_log_repository import (
 )
 from app.infrastructure.db.repositories.review_iteration_repository import (
     SqlAlchemyReviewIterationRepository,
+)
+from app.infrastructure.db.repositories.task_approval_repository import (
+    SqlAlchemyTaskApprovalRepository,
 )
 from app.infrastructure.db.repositories.task_intervention_repository import (
     SqlAlchemyTaskInterventionRepository,
@@ -70,7 +77,26 @@ class TaskRunResponse(BaseModel):
     run_number: int
     status: str
     failure_reason: str | None = None
+    tokens_used: int = 0
+    estimated_cost_cents: int = 0
+    paused_seconds: int = 0
     review_iterations: list[ReviewIterationResponse] = Field(default_factory=list)
+
+
+class PendingApprovalResponse(BaseModel):
+    approval_id: uuid.UUID
+    risk_category: str
+    action_type: str
+    action_summary: str
+    action_payload: dict[str, Any]
+    expires_at: str
+
+
+class BudgetSummaryResponse(BaseModel):
+    task_cost_cents: int
+    max_task_cost_cents: int
+    tokens_used: int
+    partial_diff: str | None = None
 
 
 class TaskDetailResponse(BaseModel):
@@ -92,6 +118,8 @@ class TaskDetailResponse(BaseModel):
     interruption_type: str | None = None
     interruption_options: list | dict | None = None
     interruption_expires_at: str | None = None
+    pending_approval: PendingApprovalResponse | None = None
+    budget_summary: BudgetSummaryResponse | None = None
     runs: list[TaskRunResponse] = Field(default_factory=list)
 
 
@@ -103,6 +131,17 @@ class InterveneRequest(BaseModel):
 class RespondRequest(BaseModel):
     response: str = Field(..., min_length=1)
     selected_option: str | None = None
+
+
+class ApprovalDecisionRequest(BaseModel):
+    decision: Literal["approved", "rejected"]
+    note: str | None = None
+
+
+class ApprovalDecisionResponse(BaseModel):
+    approval_id: uuid.UUID
+    status: str
+    task_status: str
 
 
 class AbortRequest(BaseModel):
@@ -153,7 +192,7 @@ async def get_task(
     caller: Annotated[ClerkUserContext, Depends(get_current_clerk_user)],
     org_id: Annotated[uuid.UUID | None, Query()] = None,
 ):
-    """Retrieve task details, runs, and review iterations."""
+    """Retrieve task details, runs, pending approvals, and budget summary."""
     org, task = await authorize_task_org(
         task_id,
         caller,
@@ -161,13 +200,17 @@ async def get_task(
         requested_org_id=org_id,
     )
 
-    repo_stmt = select(RepositoryModel.full_name).where(
+    repo_stmt = select(RepositoryModel).where(
         RepositoryModel.id == task.repo_id,
         RepositoryModel.org_id == org.id,
     )
-    repo_full_name = (await db.execute(repo_stmt)).scalar_one_or_none()
+    repo_model = (await db.execute(repo_stmt)).scalar_one_or_none()
+    repo_full_name = repo_model.full_name if repo_model else None
+    effective_policy = PolicyEvaluator.merge_policy(
+        org.settings,
+        repo_model.config if repo_model else None,
+    )
 
-    # Fetch runs
     runs_stmt = (
         select(TaskRunModel)
         .where(
@@ -188,6 +231,9 @@ async def get_task(
                 run_number=run.run_number,
                 status=run.status,
                 failure_reason=run.failure_reason,
+                tokens_used=run.tokens_used,
+                estimated_cost_cents=run.estimated_cost_cents,
+                paused_seconds=run.paused_seconds,
                 review_iterations=[
                     ReviewIterationResponse(
                         id=it.id,
@@ -204,6 +250,33 @@ async def get_task(
                 ],
             )
         )
+
+    approval_repo = SqlAlchemyTaskApprovalRepository(db)
+    pending_approval_model = await approval_repo.get_pending_for_task(org.id, task.id)
+    pending_approval = (
+        PendingApprovalResponse(
+            approval_id=pending_approval_model.id,
+            risk_category=pending_approval_model.risk_category,
+            action_type=pending_approval_model.action_type,
+            action_summary=pending_approval_model.action_summary,
+            action_payload=pending_approval_model.action_payload,
+            expires_at=pending_approval_model.expires_at.isoformat(),
+        )
+        if pending_approval_model is not None
+        else None
+    )
+
+    latest_run = runs_models[-1] if runs_models else None
+    latest_cp = latest_run.checkpoint_state if latest_run else {}
+    partial_diff = (
+        latest_cp.get("partial_diff") if isinstance(latest_cp, dict) else None
+    )
+    budget_summary = BudgetSummaryResponse(
+        task_cost_cents=latest_run.estimated_cost_cents if latest_run else 0,
+        max_task_cost_cents=effective_policy.max_task_cost_cents,
+        tokens_used=latest_run.tokens_used if latest_run else 0,
+        partial_diff=partial_diff if isinstance(partial_diff, str) else None,
+    )
 
     return TaskDetailResponse(
         id=task.id,
@@ -228,6 +301,8 @@ async def get_task(
             if task.interruption_expires_at
             else None
         ),
+        pending_approval=pending_approval,
+        budget_summary=budget_summary,
         runs=runs_data,
     )
 
@@ -252,8 +327,6 @@ async def stream_task_events(
     async def event_generator():
         cursor = last_event_id or "0-0"
 
-        # If task is terminal at connection time,
-        # yield remaining events and exit
         if task.status in ("completed", "failed", "cancelled"):
             remaining = await streamer.read_events(
                 task_id, last_event_id=cursor, count=500, block_ms=0
@@ -268,7 +341,6 @@ async def stream_task_events(
                     }
                 )
                 yield ServerSentEvent(data=payload, event=etype, id=eid)
-            # Send terminal status event
             terminal_payload = json.dumps(
                 {
                     "task_id": str(task_id),
@@ -368,7 +440,17 @@ async def respond_to_interruption(
     org_id: Annotated[uuid.UUID | None, Query()] = None,
 ):
     """Respond to an agent clarification request with optimistic concurrency."""
-    org, _task = await authorize_task_org(task_id, caller, db, requested_org_id=org_id)
+    org, task = await authorize_task_org(task_id, caller, db, requested_org_id=org_id)
+
+    # Approval gates cannot be bypassed via /respond
+    if task.interruption_type == "approval":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Approval gates require org:admin decision via "
+                "/approvals/{approval_id}/decision"
+            ),
+        )
 
     task_repo = SqlAlchemyTaskRepository(db)
     try:
@@ -432,6 +514,181 @@ async def respond_to_interruption(
     return {"intervention_id": str(intervention.id), "status": "accepted"}
 
 
+@router.post(
+    "/{task_id}/approvals/{approval_id}/decision",
+    response_model=ApprovalDecisionResponse,
+)
+async def decide_task_approval(
+    task_id: uuid.UUID,
+    approval_id: uuid.UUID,
+    payload: ApprovalDecisionRequest,
+    auth_ctx: Annotated[
+        tuple[ClerkUserContext, Organization], Depends(require_org_admin)
+    ],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Submit org:admin approval or rejection for a pending risky action."""
+    caller, org = auth_ctx
+    _org, task = await authorize_task_org(task_id, caller, db, requested_org_id=org.id)
+
+    approval_repo = SqlAlchemyTaskApprovalRepository(db)
+    try:
+        approval = await approval_repo.get_by_id(org.id, approval_id)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    if approval.task_id != task.id:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Approval {approval_id} not found for task {task_id}",
+        )
+
+    # Optimistic concurrency guard on task_runs.version paired with claim
+    run_stmt = (
+        select(TaskRunModel)
+        .where(
+            TaskRunModel.id == approval.task_run_id,
+            TaskRunModel.org_id == org.id,
+        )
+        .limit(1)
+    )
+    run_model = (await db.execute(run_stmt)).scalar_one_or_none()
+    if run_model is None:
+        raise HTTPException(status_code=404, detail="Associated task run not found")
+
+    decided = await approval_repo.decide_atomic(
+        org_id=org.id,
+        task_id=task.id,
+        approval_id=approval.id,
+        decision=payload.decision,
+        decided_by_clerk_user_id=caller.user_id,
+        decision_note=payload.note,
+    )
+    if decided is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Approval has already been decided or expired",
+        )
+
+    now = datetime.now(UTC)
+    expected_version = run_model.version
+    version_stmt = (
+        update(TaskRunModel)
+        .where(
+            TaskRunModel.id == run_model.id,
+            TaskRunModel.version == expected_version,
+        )
+        .values(version=expected_version + 1, updated_at=now)
+        .returning(TaskRunModel.id)
+    )
+    bumped = (await db.execute(version_stmt)).scalar_one_or_none()
+    if bumped is None:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Concurrent task run state transition detected",
+        )
+
+    task_repo = SqlAlchemyTaskRepository(db)
+    audit_repo = SqlAlchemyAuditLogRepository(db)
+    streamer = get_event_streamer()
+
+    if payload.decision == "approved":
+        try:
+            await task_repo.claim_interruption(
+                org.id, task.id, new_status="in_progress"
+            )
+        except ConcurrencyError as exc:
+            await db.rollback()
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        await audit_repo.record_event(
+            org_id=org.id,
+            actor_type="user",
+            actor_id=caller.user_id,
+            action="task_approval_approved",
+            target_type="task_approval",
+            target_id=approval.id,
+            payload_after={
+                "task_id": str(task.id),
+                "decision": "approved",
+                "note": payload.note,
+                "action_hash": approval.action_hash,
+            },
+        )
+        await streamer.append_event(
+            task.id,
+            "task.resumed",
+            {
+                "approval_id": str(approval.id),
+                "decision": "approved",
+            },
+        )
+        await db.commit()
+
+        await get_task_queue().enqueue_resume_task(
+            org_id=org.id,
+            task_id=task.id,
+            task_run_id=approval.task_run_id,
+            response={"approval_id": str(approval.id), "decision": "approved"},
+        )
+        final_task_status = "in_progress"
+    else:
+        await task_repo.clear_interruption(org.id, task.id, new_status="failed")
+        await db.execute(
+            update(TaskRunModel)
+            .where(TaskRunModel.id == run_model.id)
+            .values(
+                status="failed",
+                failure_reason="approval_rejected",
+                completed_at=now,
+                updated_at=now,
+            )
+        )
+        sbx_stmt = select(SandboxRunModel).where(
+            SandboxRunModel.task_run_id == run_model.id,
+            SandboxRunModel.org_id == org.id,
+        )
+        sbx_model = (await db.execute(sbx_stmt)).scalar_one_or_none()
+        if sbx_model and sbx_model.status == "active":
+            sbx_model.status = "terminated"
+            sbx_model.terminated_at = now
+            sbx_model.updated_at = now
+            await get_sandbox_registry().terminate_if_present(sbx_model.sandbox_id)
+
+        await audit_repo.record_event(
+            org_id=org.id,
+            actor_type="user",
+            actor_id=caller.user_id,
+            action="task_approval_rejected",
+            target_type="task_approval",
+            target_id=approval.id,
+            payload_after={
+                "task_id": str(task.id),
+                "decision": "rejected",
+                "note": payload.note,
+                "failure_reason": "approval_rejected",
+            },
+        )
+        await streamer.append_event(
+            task.id,
+            "task.status",
+            {
+                "status": "failed",
+                "failure_reason": "approval_rejected",
+                "reason": "approval_rejected",
+            },
+        )
+        await db.commit()
+        final_task_status = "failed"
+
+    return ApprovalDecisionResponse(
+        approval_id=approval.id,
+        status=decided.status,
+        task_status=final_task_status,
+    )
+
+
 @router.post("/{task_id}/abort", response_model=dict)
 async def abort_task(
     task_id: uuid.UUID,
@@ -451,7 +708,6 @@ async def abort_task(
     except ConcurrencyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    # Terminate any paused sandbox if the task was awaiting input
     run_stmt = (
         select(TaskRunModel)
         .where(
@@ -534,7 +790,6 @@ async def get_task_transcript(
             total_lines=archived.total_lines,
         )
 
-    # In flight fallback from Redis Stream
     streamer = get_event_streamer()
     terminal_text, events, total_lines = await streamer.get_stream_transcript(task_id)
     return TranscriptResponse(

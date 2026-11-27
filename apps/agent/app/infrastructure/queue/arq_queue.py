@@ -62,7 +62,7 @@ class ArqTaskQueue(TaskQueue):
         task_id: uuid.UUID,
         task_run_id: uuid.UUID | None = None,
         intervention_id: uuid.UUID | None = None,
-        response: str | None = None,
+        response: str | dict | None = None,
     ) -> str | None:
         args = (
             str(org_id),

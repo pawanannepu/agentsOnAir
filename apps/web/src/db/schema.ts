@@ -181,6 +181,7 @@ export const taskRuns = pgTable(
     completionTokens: integer("completion_tokens").notNull().default(0),
     tokensUsed: integer("tokens_used").notNull().default(0),
     estimatedCostCents: integer("estimated_cost_cents").notNull().default(0),
+    pausedSeconds: integer("paused_seconds").notNull().default(0),
     startedAt: timestamp("started_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -354,5 +355,96 @@ export const taskTranscripts = pgTable(
   (table) => [
     index("ix_task_transcripts_task_created").on(table.taskId, table.createdAt),
     index("ix_task_transcripts_org_created").on(table.orgId, table.createdAt),
+  ]
+);
+
+export const taskApprovals = pgTable(
+  "task_approvals",
+  {
+    id: uuid("id").primaryKey(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    taskRunId: uuid("task_run_id")
+      .notNull()
+      .references(() => taskRuns.id, { onDelete: "cascade" }),
+    status: varchar("status", { length: 32 }).notNull().default("pending"),
+    riskCategory: varchar("risk_category", { length: 64 }).notNull(),
+    actionType: varchar("action_type", { length: 64 }).notNull(),
+    actionHash: varchar("action_hash", { length: 64 }).notNull(),
+    actionSummary: text("action_summary").notNull(),
+    actionPayload: jsonb("action_payload").notNull().default({}),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    decidedByClerkUserId: varchar("decided_by_clerk_user_id", { length: 255 }),
+    decisionNote: text("decision_note"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("uq_task_approvals_pending_task")
+      .on(table.taskId)
+      .where(sql`${table.status} = 'pending'`),
+    index("ix_task_approvals_task_created").on(table.taskId, table.createdAt),
+  ]
+);
+
+export const usageEvents = pgTable(
+  "usage_events",
+  {
+    id: uuid("id").primaryKey(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id").references(() => tasks.id, { onDelete: "cascade" }),
+    taskRunId: uuid("task_run_id").references(() => taskRuns.id, {
+      onDelete: "cascade",
+    }),
+    prReviewId: uuid("pr_review_id"),
+    provider: varchar("provider", { length: 64 }).notNull(),
+    model: varchar("model", { length: 128 }).notNull(),
+    operationType: varchar("operation_type", { length: 32 }).notNull(),
+    promptTokens: integer("prompt_tokens").notNull(),
+    completionTokens: integer("completion_tokens").notNull(),
+    estimatedCostCents: integer("estimated_cost_cents").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("ix_usage_events_org_created").on(table.orgId, table.createdAt),
+    index("ix_usage_events_task_run_created").on(
+      table.taskRunId,
+      table.createdAt
+    ),
+  ]
+);
+
+export const orgMonthlyUsage = pgTable(
+  "org_monthly_usage",
+  {
+    id: uuid("id").primaryKey(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    billingMonth: varchar("billing_month", { length: 7 }).notNull(),
+    totalTokens: bigint("total_tokens", { mode: "number" })
+      .notNull()
+      .default(0),
+    totalCostCents: integer("total_cost_cents").notNull().default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("uq_org_monthly_usage_org_month").on(
+      table.orgId,
+      table.billingMonth
+    ),
   ]
 );

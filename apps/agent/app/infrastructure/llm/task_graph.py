@@ -2,14 +2,27 @@
 
 import base64
 from collections import defaultdict
+from collections.abc import Awaitable, Callable
 from typing import Any, TypedDict
 
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
-from app.application.ports.model_gateway import ForgeAgent, ReviewerCritic
+from app.application.ports.github_gateway import GitHubGateway
+from app.application.ports.model_gateway import (
+    ForgeAgent,
+    ForgeResult,
+    ReviewerCritic,
+    ReviewerResult,
+)
 from app.application.services.sandbox_workspace import SandboxWorkspace
+from app.domain.exceptions import ApprovalRequiredError, ProtectedBranchError
+from app.domain.services.policy_evaluator import (
+    EffectiveGuardrailPolicy,
+    PolicyEvaluator,
+    RiskClassification,
+)
 
 
 class TaskGraphState(TypedDict):
@@ -25,6 +38,7 @@ class TaskGraphState(TypedDict):
     clarification_options: list[str]
     clarification_response: str | None
     guidance_messages: list[str]
+    approved_action_hashes: list[str]
     forge_completed: bool
     forge_summary: str
     forge_steps_taken: int
@@ -35,6 +49,16 @@ class TaskGraphState(TypedDict):
     review_findings: list[dict[str, Any]]
     review_blocking_count: int
     review_non_blocking_count: int
+    published: bool
+    pr_url: str | None
+    pr_number: int | None
+    commit_sha: str | None
+
+
+ForgeUsageHook = Callable[[ForgeResult], Awaitable[None]]
+ReviewerUsageHook = Callable[[ReviewerResult], Awaitable[None]]
+PreflightHook = Callable[[], Awaitable[None]]
+ApprovalCheckHook = Callable[[RiskClassification], Awaitable[bool]]
 
 
 class PostgresTaskCheckpointSaver(InMemorySaver):
@@ -85,9 +109,26 @@ class PostgresTaskCheckpointSaver(InMemorySaver):
                     }
                 )
 
+        serialized_blobs: list[dict[str, Any]] = []
+        for (tid, ns, channel, version), blob_tuple in self.blobs.items():
+            if tid != thread_id:
+                continue
+            serialized_blobs.append(
+                {
+                    "ns": ns,
+                    "channel": channel,
+                    "version": str(version),
+                    "value": [
+                        blob_tuple[0],
+                        base64.b64encode(blob_tuple[1]).decode("ascii"),
+                    ],
+                }
+            )
+
         return {
             "storage": serialized_storage,
             "writes": serialized_writes,
+            "blobs": serialized_blobs,
         }
 
     def import_thread_state(self, thread_id: str, payload: dict[str, Any]) -> None:
@@ -124,14 +165,55 @@ class PostgresTaskCheckpointSaver(InMemorySaver):
                         item.get("task_path", ""),
                     )
 
+        raw_blobs = payload.get("blobs", [])
+        if isinstance(raw_blobs, list):
+            for entry in raw_blobs:
+                if not isinstance(entry, dict):
+                    continue
+                val_raw = entry["value"]
+                blob_key = (
+                    thread_id,
+                    entry.get("ns", ""),
+                    entry["channel"],
+                    entry["version"],
+                )
+                self.blobs[blob_key] = (
+                    val_raw[0],
+                    base64.b64decode(val_raw[1]),
+                )
+
+
+def _interrupt_for_classification(classification: RiskClassification) -> Any:
+    return interrupt(
+        {
+            "interruption_type": "approval",
+            "prompt": classification.action_summary,
+            "options": ["Approve", "Reject"],
+            "risk_category": classification.risk_category,
+            "action_type": classification.action_type,
+            "action_hash": classification.action_hash,
+            "action_summary": classification.action_summary,
+            "action_payload": classification.action_payload,
+        }
+    )
+
 
 def build_task_cycle_graph(
     forge_agent: ForgeAgent,
     reviewer_critic: ReviewerCritic,
     workspace: SandboxWorkspace,
     checkpointer: PostgresTaskCheckpointSaver,
+    *,
+    github_gateway: GitHubGateway | None = None,
+    policy: EffectiveGuardrailPolicy | None = None,
+    preflight_hook: PreflightHook | None = None,
+    on_forge_usage: ForgeUsageHook | None = None,
+    on_reviewer_usage: ReviewerUsageHook | None = None,
+    approval_checker: ApprovalCheckHook | None = None,
 ):
-    """Compile a LangGraph StateGraph supporting human in the loop interrupt/resume."""
+    """Compile a LangGraph StateGraph supporting human approvals and host publishing."""
+    effective_policy = policy or workspace.policy or EffectiveGuardrailPolicy()
+    evaluator = PolicyEvaluator()
 
     async def clarification_gate(state: TaskGraphState) -> dict[str, Any]:
         if state.get("clarification_needed") and not state.get(
@@ -151,18 +233,44 @@ def build_task_cycle_graph(
         return {}
 
     async def forge_node(state: TaskGraphState) -> dict[str, Any]:
+        if preflight_hook is not None:
+            await preflight_hook()
+
         context = dict(state["task_context"])
         if state.get("clarification_response"):
             context["clarification_response"] = state["clarification_response"]
         if state.get("guidance_messages"):
             context["guidance_messages"] = state["guidance_messages"]
 
-        result = await forge_agent.run_cycle(
-            context,
-            state.get("previous_review"),
-            workspace,
-        )
+        approved_hashes = list(state.get("approved_action_hashes") or [])
+        while True:
+            try:
+                result = await forge_agent.run_cycle(
+                    context,
+                    state.get("previous_review"),
+                    workspace,
+                )
+                break
+            except ApprovalRequiredError as exc:
+                classification = exc.classification
+                assert isinstance(classification, RiskClassification)
+                resume_value = _interrupt_for_classification(classification)
+                if (
+                    isinstance(resume_value, dict)
+                    and resume_value.get("decision") == "approved"
+                    and classification.action_hash
+                ):
+                    if classification.action_hash not in approved_hashes:
+                        approved_hashes.append(classification.action_hash)
+                    # Allow replay inside this loop once approved
+                    continue
+                raise
+
+        if on_forge_usage is not None:
+            await on_forge_usage(result)
+
         return {
+            "approved_action_hashes": approved_hashes,
             "forge_completed": result.completed,
             "forge_summary": result.summary,
             "forge_steps_taken": result.steps_taken,
@@ -171,11 +279,17 @@ def build_task_cycle_graph(
         }
 
     async def reviewer_node(state: TaskGraphState) -> dict[str, Any]:
+        if preflight_hook is not None:
+            await preflight_hook()
+
         result = await reviewer_critic.evaluate(
             state["task_context"],
             state["forge_diff"],
             state["forge_test_output"],
         )
+        if on_reviewer_usage is not None:
+            await on_reviewer_usage(result)
+
         return {
             "review_verdict": result.verdict,
             "review_summary": result.summary,
@@ -184,15 +298,113 @@ def build_task_cycle_graph(
             "review_non_blocking_count": result.non_blocking_count,
         }
 
+    def route_after_review(state: TaskGraphState) -> str:
+        if (
+            int(state.get("review_blocking_count", 0)) == 0
+            and github_gateway is not None
+        ):
+            return "host_publish_node"
+        return END
+
+    async def host_publish_node(state: TaskGraphState) -> dict[str, Any]:
+        if github_gateway is None:
+            return {"published": False}
+
+        ctx = state["task_context"]
+        repo_full_name = str(ctx.get("repo_full_name", ""))
+        installation_id = int(ctx.get("github_installation_id", 0))
+        base_branch = str(ctx.get("base_branch", "main"))
+        work_branch = str(ctx.get("work_branch", "agentsonair/work"))
+        title = str(ctx.get("title", "Automated fix"))
+        description = str(ctx.get("description", ""))
+        cycle_number = int(state.get("cycle_number", 1))
+        force_push = bool(ctx.get("force_push", False))
+        diff_text = state.get("forge_diff", "")
+        approved_hashes = list(state.get("approved_action_hashes") or [])
+
+        classification = evaluator.classify_publish(
+            head_branch=work_branch,
+            diff_text=diff_text,
+            policy=effective_policy,
+            cycle_number=cycle_number,
+            force=force_push,
+        )
+        if classification.decision == "block":
+            raise ProtectedBranchError(classification.action_summary)
+
+        if classification.decision == "require_approval":
+            already_approved = (
+                classification.action_hash is not None
+                and classification.action_hash in approved_hashes
+            )
+            if not already_approved and approval_checker is not None:
+                already_approved = await approval_checker(classification)
+            if not already_approved:
+                resume_value = _interrupt_for_classification(classification)
+                if (
+                    isinstance(resume_value, dict)
+                    and resume_value.get("decision") == "approved"
+                    and classification.action_hash
+                ):
+                    approved_hashes.append(classification.action_hash)
+
+        write_token = await github_gateway.get_installation_token(
+            installation_id, write_access=True
+        )
+        commit_msg = (
+            f"fix: {title}\n\nCo-authored-by: agentsonair[bot] <bot@agentsonair.dev>"
+        )
+        commit_sha = await github_gateway.push_branch(
+            repo_full_name,
+            work_branch,
+            commit_msg,
+            write_token,
+            diff_text,
+            protected_branches=effective_policy.protected_branches,
+            force=force_push,
+        )
+        pr_title = f"fix: {title}"
+        pr_body = (
+            f"## Summary\n\n"
+            f"Automated verified fix implemented by agentsOnAir.\n\n"
+            f"### Task\n{description}\n\n"
+            f"### Changes\n"
+            f"{state.get('forge_summary', '')}\n\n"
+            f"### Review Verdict\n"
+            f"Approved on cycle {cycle_number} with zero blocking findings."
+        )
+        pr_data = await github_gateway.create_pull_request(
+            repo_full_name,
+            base_branch,
+            work_branch,
+            pr_title,
+            pr_body,
+            write_token,
+            protected_branches=effective_policy.protected_branches,
+        )
+        return {
+            "approved_action_hashes": approved_hashes,
+            "published": True,
+            "pr_url": str(pr_data["pr_url"]),
+            "pr_number": int(pr_data["pr_number"]),
+            "commit_sha": commit_sha,
+        }
+
     builder = StateGraph(TaskGraphState)
     builder.add_node("clarification_gate", clarification_gate)
     builder.add_node("forge_node", forge_node)
     builder.add_node("reviewer_node", reviewer_node)
+    builder.add_node("host_publish_node", host_publish_node)
 
     builder.add_edge(START, "clarification_gate")
     builder.add_edge("clarification_gate", "forge_node")
     builder.add_edge("forge_node", "reviewer_node")
-    builder.add_edge("reviewer_node", END)
+    builder.add_conditional_edges(
+        "reviewer_node",
+        route_after_review,
+        {"host_publish_node": "host_publish_node", END: END},
+    )
+    builder.add_edge("host_publish_node", END)
 
     return builder.compile(checkpointer=checkpointer)
 

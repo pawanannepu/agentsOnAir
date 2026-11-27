@@ -141,3 +141,19 @@ class SqlAlchemyRepositoryRepository(RepositoryRepository):
             raise NotFoundError(f"Repository {repo_id} not found in organization")
         model.deleted_at = datetime.now(UTC)
         await self._session.flush()
+
+    async def update_config(
+        self, org_id: uuid.UUID, repo_id: uuid.UUID, config: dict
+    ) -> Repository:
+        stmt = select(RepositoryModel).where(
+            RepositoryModel.org_id == org_id,
+            RepositoryModel.id == repo_id,
+            RepositoryModel.deleted_at.is_(None),
+        )
+        model = (await self._session.execute(stmt)).scalar_one_or_none()
+        if not model:
+            raise NotFoundError(f"Repository {repo_id} not found in organization")
+        model.config = config
+        model.updated_at = datetime.now(UTC)
+        await self._session.flush()
+        return _to_entity(model)

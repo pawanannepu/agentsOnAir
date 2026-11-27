@@ -651,4 +651,159 @@ describe("Live Task Streaming and Interactive Collaboration UI", () => {
       expect(screen.getByText(/Showing 2 lines/)).toBeInTheDocument();
     });
   });
+
+  it("handles live task.approval_requested, task.budget_updated, and budget_exceeded SSE events (covers: AC-3, AC-5, AC-6)", async () => {
+    render(
+      <BreadcrumbProvider>
+        <TaskDetailClient
+          taskId={sampleTaskId}
+          orgId="org-uuid-1"
+          isAdmin
+          authToken="tok_sse"
+        />
+      </BreadcrumbProvider>
+    );
+
+    await waitFor(() => {
+      expect(eventSourceCallbacks.onmessage).toBeDefined();
+    });
+
+    await React.act(async () => {
+      eventSourceCallbacks.onmessage?.({
+        id: "400-1",
+        event: "task.approval_requested",
+        data: JSON.stringify({
+          approval_id: "app-sse-1",
+          risk_category: "destructive_shell",
+          action_type: "sandbox_command",
+          action_summary: "Execute destructive shell command 'rm -rf /tmp/x'",
+          action_payload: { command: "rm -rf /tmp/x" },
+          expires_at: "2026-11-27T12:00:00Z",
+        }),
+      });
+      eventSourceCallbacks.onmessage?.({
+        id: "400-2",
+        event: "task.budget_updated",
+        data: JSON.stringify({
+          task_cost_cents: 240,
+          max_task_cost_cents: 500,
+          tokens_used: 9500,
+          org_month_cost_cents: 1240,
+          max_monthly_org_cost_cents: 10000,
+        }),
+      });
+    });
+
+    expect(screen.getByText("Guardrail Approval Required")).toBeInTheDocument();
+    expect(screen.getByText("destructive_shell")).toBeInTheDocument();
+    expect(screen.getByText("$2.40 / $5.00")).toBeInTheDocument();
+    expect(screen.getByText(/9,500 tokens/i)).toBeInTheDocument();
+
+    await React.act(async () => {
+      eventSourceCallbacks.onmessage?.({
+        id: "400-3",
+        event: "task.status",
+        data: JSON.stringify({
+          status: "failed",
+          failure_reason: "budget_exceeded",
+        }),
+      });
+    });
+
+    expect(
+      screen.queryByText("Guardrail Approval Required")
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Halted: budget_exceeded")).toBeInTheDocument();
+  });
+
+  it("handles approval rejection and 403 org_admin_required on decideApproval (covers: AC-4, AC-7)", async () => {
+    const forbiddenEvents: CustomEvent[] = [];
+    const listener = (ev: Event) => forbiddenEvents.push(ev as CustomEvent);
+    window.addEventListener(ORG_FORBIDDEN_EVENT, listener);
+
+    global.fetch = vi
+      .fn()
+      .mockImplementation((url: string, init?: RequestInit) => {
+        if (url.endsWith(`/api/v1/tasks/${sampleTaskId}`) && !init?.method) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                title: "Approval Reject Test",
+                status: "awaiting_input",
+                interruption_prompt: "Approve force push?",
+                interruption_type: "approval",
+                pending_approval: {
+                  approval_id: "app-rej-1",
+                  risk_category: "force_git_op",
+                  action_type: "sandbox_command",
+                  action_summary: "Execute git operation 'git push --force'",
+                  action_payload: { command: "git push --force" },
+                  expires_at: "2026-11-27T12:00:00Z",
+                },
+                budget_summary: {
+                  task_cost_cents: 10,
+                  max_task_cost_cents: 500,
+                  tokens_used: 300,
+                },
+              }),
+              { status: 200 }
+            )
+          );
+        }
+        if (url.endsWith("/approvals/app-rej-1/decision")) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                detail: {
+                  code: "org_admin_required",
+                  message: "Organization admin role (org:admin) is required",
+                },
+              }),
+              { status: 403 }
+            )
+          );
+        }
+        return Promise.resolve(new Response("{}", { status: 200 }));
+      });
+
+    try {
+      render(
+        <BreadcrumbProvider>
+          <TaskDetailClient
+            taskId={sampleTaskId}
+            orgId="org-uuid-1"
+            isAdmin
+            authToken="tok_member"
+          />
+        </BreadcrumbProvider>
+      );
+
+      await waitFor(() => {
+        expect(
+          screen.getByRole("button", { name: /Reject Action/i })
+        ).toBeInTheDocument();
+      });
+
+      fireEvent.change(screen.getByLabelText("Approval decision note"), {
+        target: { value: "Too risky" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /Reject Action/i }));
+
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalledWith(
+          "Organization admin role (org:admin) is required"
+        );
+      });
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.stringContaining("/approvals/app-rej-1/decision"),
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ decision: "rejected", note: "Too risky" }),
+        })
+      );
+      expect(forbiddenEvents).toHaveLength(0);
+    } finally {
+      window.removeEventListener(ORG_FORBIDDEN_EVENT, listener);
+    }
+  });
 });

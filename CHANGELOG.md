@@ -33,7 +33,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Authenticated task collaboration endpoints for developer steering guidance, optimistic concurrency clarification replies, and task cancellation with audit logging
 - Transcript archival storing gzip compressed terminal logs and structured stream events in PostgreSQL alongside an in flight transcript fallback endpoint
 - Console task detail inspector and `useTaskStream` hook displaying live ANSI terminal logs, phase filtered step progress, clarification banners, and steering controls
+- PostgreSQL migration and Drizzle schema definitions for `task_approvals`, append only `usage_events`, `org_monthly_usage`, and `task_runs.paused_seconds` (see spec 0008)
+- Organization and repository guardrail policy endpoints (`GET /api/v1/organizations/guardrails`, `GET /api/v1/organizations/usage`, `GET /api/v1/repositories`, `GET /api/v1/repositories/{repo_id}/guardrails`, `PATCH /api/v1/repositories/{repo_id}/guardrails`) supporting repository level overrides (see spec 0008)
+- Protected branch `fnmatchcase` glob validation across host GitHub publishing and sandbox `pre-push` hooks via system `core.hooksPath`, paired with post clone token stripping after `contents:read` checkouts (see spec 0008)
+- Admin approval gate (`POST /api/v1/tasks/{task_id}/approvals/{approval_id}/decision`) pausing risky shell commands, sensitive path edits, force git operations, and oversized diffs via LangGraph interrupts and `task.approval_requested` SSE events (see spec 0008)
+- Per call LLM token telemetry, ceiling integer cent cost accounting, `task.budget_updated` SSE events, and automatic halts on task cost, monthly organization spend, cycle count, or active runtime limits excluding paused wait time (see spec 0008)
+- Sandbox network egress settings (`network_egress_mode`, `allowed_egress_domains`) and console views in `/settings`, `/repositories`, and `/tasks/[id]` for budgets, monthly spend, guardrail overrides, live dollar meters, and admin approval controls (see spec 0008)
+
+### Changed
+- Isolated GitHub pushes and pull request creation into `host_publish_node` inside the LangGraph workflow so write credentials stay outside sandbox workspaces (see spec 0008)
+- Extended `PATCH /api/v1/organizations/settings` with bounded guardrail validation and `audit_logs` recording, and updated `POST /api/v1/tasks/{task_id}/respond` to reject approval pauses with `409 Conflict` (see spec 0008)
 
 ### Fixed
 - Infinite re render loop in breadcrumb context hook by memoizing item comparisons and bailing out on stable content
 - React hydration mismatch in sidebar collapse state by reading cookie values through useSyncExternalStore with server fallback
+- Clerk v2 compact organization role normalization (`admin` to `org:admin`, `member` to `org:member`) during JWT verification so organization admins retain access
+- Sandbox workspace clone initialization and diff capture handling pre initialized `.git` directories and staging untracked files with `git add -N` before generating diffs

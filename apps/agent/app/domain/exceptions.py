@@ -58,3 +58,32 @@ class ConfigurationError(DomainError):
 
 class ExternalServiceError(DomainError):
     """Raised when an upstream external service call fails or times out."""
+
+
+class ProtectedBranchError(DomainError):
+    """Raised when a push or PR targets a protected branch."""
+
+
+class ApprovalRequiredError(DomainError):
+    """Raised when a risky sandbox or host action requires org:admin approval."""
+
+    def __init__(self, classification: object) -> None:
+        summary = getattr(classification, "action_summary", "Approval required")
+        super().__init__(summary)
+        self.classification = classification
+
+
+class GuardrailBlockedError(DomainError):
+    """Raised when a guardrail policy blocks an action outright."""
+
+    def __init__(self, message: str, reason: str = "guardrail_blocked") -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
+class BudgetExceededError(DomainError):
+    """Raised when task or monthly organization spending cap is reached."""
+
+
+class TaskTimeoutError(DomainError):
+    """Raised when active execution time exceeds configured timeout_minutes."""

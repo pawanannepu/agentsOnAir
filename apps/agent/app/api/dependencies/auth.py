@@ -178,7 +178,7 @@ async def require_org_admin(
 ) -> tuple[ClerkUserContext, Organization]:
     """Require an active organization and org:admin role on the Clerk JWT."""
     org = await resolve_caller_org(caller, db)
-    if caller.org_role != "org:admin":
+    if caller.org_role not in ("org:admin", "admin"):
         raise forbidden_error(
             "org_admin_required",
             "Organization admin role (org:admin) is required",

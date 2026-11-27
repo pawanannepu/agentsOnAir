@@ -3,8 +3,15 @@
 import hashlib
 import time
 import uuid
+from collections.abc import Sequence
 
 from app.application.ports.github_gateway import GitHubGateway
+from app.domain.exceptions import ProtectedBranchError, ValidationError
+from app.domain.services.policy_evaluator import (
+    DEFAULT_PROTECTED_BRANCHES,
+    EffectiveGuardrailPolicy,
+    PolicyEvaluator,
+)
 
 
 class GitHubService(GitHubGateway):
@@ -26,6 +33,23 @@ class GitHubService(GitHubGateway):
         token_type = "write" if write_access else "read"
         return f"ghs_{token_type}_{installation_id}_{uuid.uuid4().hex[:12]}"
 
+    @staticmethod
+    def _assert_branch_allowed(
+        branch_name: str, protected_branches: Sequence[str] | None
+    ) -> None:
+        patterns = tuple(
+            protected_branches
+            if protected_branches is not None
+            else DEFAULT_PROTECTED_BRANCHES
+        )
+        policy = EffectiveGuardrailPolicy(protected_branches=patterns)
+        if PolicyEvaluator.is_protected_branch(branch_name, policy):
+            stripped = branch_name.strip().removeprefix("refs/heads/")
+            raise ProtectedBranchError(
+                "protected_branch_blocked: direct push to protected branch "
+                f"'{stripped}' is prohibited"
+            )
+
     async def push_branch(
         self,
         repo_full_name: str,
@@ -33,9 +57,16 @@ class GitHubService(GitHubGateway):
         commit_message: str,
         token: str,
         diff_text: str | None = None,
+        protected_branches: Sequence[str] | None = None,
+        force: bool = False,
     ) -> str:
+        if token.startswith("ghs_read_"):
+            raise ValidationError("Write token required to push branch")
+        self._assert_branch_allowed(branch_name, protected_branches)
         # Produce a verifiable 40-character commit SHA
-        content = f"{repo_full_name}:{branch_name}:{diff_text or ''}:{time.time()}"
+        content = (
+            f"{repo_full_name}:{branch_name}:{diff_text or ''}:{force}:{time.time()}"
+        )
         commit_sha = hashlib.sha1(content.encode("utf-8")).hexdigest()
         return commit_sha
 
@@ -47,7 +78,11 @@ class GitHubService(GitHubGateway):
         title: str,
         body: str,
         token: str,
+        protected_branches: Sequence[str] | None = None,
     ) -> dict[str, str | int]:
+        if token.startswith("ghs_read_"):
+            raise ValidationError("Write token required to create pull request")
+        self._assert_branch_allowed(head_branch, protected_branches)
         # Generate simulated or real pull request
         pr_number = int(time.time()) % 100000 + 1
         pr_url = f"https://github.com/{repo_full_name}/pull/{pr_number}"

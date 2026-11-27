@@ -2,14 +2,19 @@
 
 import time
 import uuid
+from typing import Any
 
 from app.application.ports.audit_log_repository import AuditLogRepository
 from app.application.ports.github_gateway import GitHubGateway
+from app.application.ports.organization_repository import OrganizationRepository
 from app.application.ports.pr_review_repository import PRReviewRepository
 from app.application.ports.repository_repository import RepositoryRepository
+from app.application.ports.usage_repository import UsageRepository
 from app.application.services.context_budget_allocator import ContextBudgetAllocator
 from app.application.services.symbol_indexer import SymbolIndexer
+from app.application.services.usage_tracker import UsageTracker
 from app.domain.entities.pull_request_review import PullRequestReview
+from app.domain.services.policy_evaluator import PolicyEvaluator
 from app.infrastructure.github.review_publisher import GitHubReviewPublisher
 from app.infrastructure.llm.reviewer_node import CodeReviewAnalyzerNode
 
@@ -25,6 +30,8 @@ class RunPRReviewUseCase:
         audit_log_repo: AuditLogRepository | None = None,
         reviewer_node: CodeReviewAnalyzerNode | None = None,
         review_publisher: GitHubReviewPublisher | None = None,
+        organization_repo: OrganizationRepository | None = None,
+        usage_repo: UsageRepository | None = None,
     ) -> None:
         self._pr_review_repo = pr_review_repo
         self._repository_repo = repository_repo
@@ -34,6 +41,12 @@ class RunPRReviewUseCase:
         self._review_publisher = review_publisher or GitHubReviewPublisher(
             github_gateway
         )
+        self._organization_repo = organization_repo
+        self._usage_repo = usage_repo
+        self._usage_tracker = (
+            UsageTracker(usage_repo) if usage_repo is not None else None
+        )
+        self._policy_evaluator = PolicyEvaluator()
 
     async def execute(
         self,
@@ -46,7 +59,38 @@ class RunPRReviewUseCase:
         review = await self._pr_review_repo.get_by_id(org_id, review_id)
         repo = await self._repository_repo.get_by_id(org_id, review.repo_id)
 
+        org_settings: dict[str, Any] | None = None
+        if self._organization_repo is not None:
+            try:
+                org = await self._organization_repo.get_by_id(org_id)
+                org_settings = org.settings
+            except Exception:
+                org_settings = None
+        policy = self._policy_evaluator.merge_policy(org_settings, repo.config)
+
         try:
+            if self._usage_tracker is not None:
+                preflight = await self._usage_tracker.check_preflight(org_id, policy)
+                if preflight == "budget_exceeded":
+                    duration_ms = int((time.time() - start_time) * 1000)
+                    failed_review = await self._pr_review_repo.update_status(
+                        review_id=review_id,
+                        status="failed",
+                        error_message="budget_exceeded",
+                        execution_duration_ms=duration_ms,
+                    )
+                    if self._audit_log_repo:
+                        await self._audit_log_repo.record_event(
+                            org_id=org_id,
+                            actor_type="system",
+                            actor_id="pr_reviewer_engine",
+                            action="pr_review_budget_exceeded",
+                            target_type="pull_request_review",
+                            target_id=review_id,
+                            payload_after={"error": "budget_exceeded"},
+                        )
+                    return failed_review
+
             # 1. Sub-state: analyzing (fetch diff & index repository)
             await self._pr_review_repo.update_status(review_id, status="analyzing")
 
@@ -83,6 +127,19 @@ class RunPRReviewUseCase:
                 allow_approval=repo.review_settings.get("allow_approval", False),
                 simulated_findings=simulated_findings,
             )
+
+            if self._usage_tracker is not None:
+                await self._usage_tracker.record_call_and_check(
+                    org_id=org_id,
+                    provider=analysis.provider,
+                    model=analysis.model,
+                    operation_type="pr_review",
+                    prompt_tokens=analysis.prompt_tokens,
+                    completion_tokens=analysis.completion_tokens,
+                    policy=policy,
+                    task_id=review.task_id,
+                    pr_review_id=review_id,
+                )
 
             # Store findings
             if analysis.findings:

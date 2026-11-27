@@ -85,9 +85,20 @@ class Settings(BaseSettings):
 
     # Interruption watchdog timeout (15 minutes)
     INTERRUPTION_TIMEOUT_SECONDS: int = 900
+    DEFAULT_APPROVAL_TIMEOUT_SECONDS: int | None = None
+
+    # Model pricing overrides JSON: model_name -> {input, output}_cents_per_million
+    MODEL_PRICING_OVERRIDES_JSON: str | None = None
 
     # Redis telemetry and pubsub
     REDIS_URL: str = "redis://localhost:6379/0"
+
+    @property
+    def approval_timeout_seconds(self) -> int:
+        """Return configured approval watchdog timeout in seconds."""
+        return (
+            self.DEFAULT_APPROVAL_TIMEOUT_SECONDS or self.INTERRUPTION_TIMEOUT_SECONDS
+        )
 
 
 settings = Settings()

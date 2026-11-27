@@ -4,7 +4,7 @@ import asyncio
 import base64
 import json
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -469,3 +469,61 @@ async def test_authorize_task_org_lazy_sync_on_task_get(
     assert res.status_code == 200
     assert res.json()["id"] == str(task_id)
     assert res.json()["org_id"] == str(org_id)
+
+
+@pytest.mark.asyncio
+async def test_clerk_v2_compact_org_role_claim_allows_admin_and_blocks_member(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+):
+    """Verify Clerk v2 compact 'o.rol' claim ('admin'/'member') works with RBAC."""
+    import jwt as pyjwt
+
+    from app.core.clerk_auth import verify_clerk_jwt
+
+    monkeypatch.setattr(settings, "CLERK_JWT_KEY", _PUB_PEM)
+    org_repo = SqlAlchemyOrganizationRepository(db_session)
+    org = await org_repo.create_or_update(
+        clerk_org_id=f"org_v2_{uuid.uuid4().hex[:10]}",
+        name="Clerk V2 Org",
+        slug=f"clerk-v2-{uuid.uuid4().hex[:8]}",
+    )
+    await db_session.commit()
+
+    now = datetime.now(UTC)
+    admin_v2_tok = pyjwt.encode(
+        {
+            "sub": "user_v2_admin",
+            "iat": int(now.timestamp()),
+            "exp": int((now + timedelta(minutes=15)).timestamp()),
+            "o": {"id": org.clerk_org_id, "rol": "admin", "slg": org.slug},
+        },
+        _PRIV_PEM,
+        algorithm="RS256",
+    )
+    member_v2_tok = pyjwt.encode(
+        {
+            "sub": "user_v2_member",
+            "iat": int(now.timestamp()),
+            "exp": int((now + timedelta(minutes=15)).timestamp()),
+            "o": {"id": org.clerk_org_id, "rol": "member", "slg": org.slug},
+        },
+        _PRIV_PEM,
+        algorithm="RS256",
+    )
+
+    assert verify_clerk_jwt(admin_v2_tok, jwt_key=_PUB_PEM).org_role == "org:admin"
+    assert verify_clerk_jwt(member_v2_tok, jwt_key=_PUB_PEM).org_role == "org:member"
+
+    res_member = await client.get(
+        "/api/v1/organizations/settings",
+        headers={"Authorization": f"Bearer {member_v2_tok}"},
+    )
+    assert res_member.status_code == 403
+    assert res_member.json()["detail"]["code"] == "org_admin_required"
+
+    res_admin = await client.get(
+        "/api/v1/organizations/settings",
+        headers={"Authorization": f"Bearer {admin_v2_tok}"},
+    )
+    assert res_admin.status_code == 200
+    assert res_admin.json()["id"] == str(org.id)

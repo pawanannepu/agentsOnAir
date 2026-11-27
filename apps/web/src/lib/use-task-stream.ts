@@ -19,6 +19,24 @@ export interface InterruptionState {
   expiresAt?: string | null;
 }
 
+export interface PendingApprovalState {
+  approvalId: string;
+  riskCategory: string;
+  actionType: string;
+  actionSummary: string;
+  actionPayload: Record<string, unknown>;
+  expiresAt: string;
+}
+
+export interface BudgetSummaryState {
+  taskCostCents: number;
+  maxTaskCostCents: number;
+  tokensUsed: number;
+  orgMonthCostCents?: number;
+  maxMonthlyOrgCostCents?: number;
+  partialDiff?: string | null;
+}
+
 export interface UseTaskStreamOptions {
   taskId: string;
   orgId?: string;
@@ -34,17 +52,28 @@ export interface UseTaskStreamReturn {
   logs: string[];
   steps: StepEvent[];
   interruption: InterruptionState | null;
+  pendingApproval: PendingApprovalState | null;
+  budgetSummary: BudgetSummaryState | null;
+  failureReason: string | null;
   status: string;
   isStreaming: boolean;
   error: string | null;
   hydrateSnapshot: (snapshot: {
     status?: string;
     interruption?: InterruptionState | null;
+    pendingApproval?: PendingApprovalState | null;
+    budgetSummary?: BudgetSummaryState | null;
+    failureReason?: string | null;
     logs?: string[];
     replaceLogs?: boolean;
   }) => void;
   intervene: (message: string, actionType?: string) => Promise<boolean>;
   respond: (response: string, selectedOption?: string) => Promise<boolean>;
+  decideApproval: (
+    approvalId: string,
+    decision: "approved" | "rejected",
+    note?: string
+  ) => Promise<{ ok: boolean; error?: string }>;
   abort: (reason?: string) => Promise<boolean>;
   connect: () => void;
   disconnect: () => void;
@@ -102,6 +131,11 @@ export function useTaskStream({
   const [steps, setSteps] = React.useState<StepEvent[]>([]);
   const [interruption, setInterruption] =
     React.useState<InterruptionState | null>(null);
+  const [pendingApproval, setPendingApproval] =
+    React.useState<PendingApprovalState | null>(null);
+  const [budgetSummary, setBudgetSummary] =
+    React.useState<BudgetSummaryState | null>(null);
+  const [failureReason, setFailureReason] = React.useState<string | null>(null);
   const [status, setStatus] = React.useState<string>(initialStatus);
   const [isStreaming, setIsStreaming] = React.useState<boolean>(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -127,6 +161,9 @@ export function useTaskStream({
     (snapshot: {
       status?: string;
       interruption?: InterruptionState | null;
+      pendingApproval?: PendingApprovalState | null;
+      budgetSummary?: BudgetSummaryState | null;
+      failureReason?: string | null;
       logs?: string[];
       replaceLogs?: boolean;
     }) => {
@@ -135,6 +172,15 @@ export function useTaskStream({
       }
       if (snapshot.interruption !== undefined) {
         setInterruption(snapshot.interruption);
+      }
+      if (snapshot.pendingApproval !== undefined) {
+        setPendingApproval(snapshot.pendingApproval);
+      }
+      if (snapshot.budgetSummary !== undefined) {
+        setBudgetSummary(snapshot.budgetSummary);
+      }
+      if (snapshot.failureReason !== undefined) {
+        setFailureReason(snapshot.failureReason);
       }
       if (snapshot.logs && snapshot.logs.length > 0) {
         setLogs((prev) =>
@@ -305,6 +351,72 @@ export function useTaskStream({
                   return [...prev, updatedStep];
                 });
               }
+            } else if (ev.event === "task.approval_requested") {
+              const approvalId =
+                typeof parsed.approval_id === "string"
+                  ? parsed.approval_id
+                  : "";
+              const riskCategory =
+                typeof parsed.risk_category === "string"
+                  ? parsed.risk_category
+                  : "destructive_shell";
+              const actionType =
+                typeof parsed.action_type === "string"
+                  ? parsed.action_type
+                  : "sandbox_command";
+              const actionSummary =
+                typeof parsed.action_summary === "string"
+                  ? parsed.action_summary
+                  : "Approval required";
+              const actionPayload =
+                parsed.action_payload &&
+                typeof parsed.action_payload === "object"
+                  ? (parsed.action_payload as Record<string, unknown>)
+                  : {};
+              const expiresAt =
+                typeof parsed.expires_at === "string" ? parsed.expires_at : "";
+
+              if (approvalId) {
+                setPendingApproval({
+                  approvalId,
+                  riskCategory,
+                  actionType,
+                  actionSummary,
+                  actionPayload,
+                  expiresAt,
+                });
+              }
+              setInterruption({
+                prompt: actionSummary,
+                options: ["Approve", "Reject"],
+                interruptionType: "approval",
+                expiresAt,
+              });
+              setStatus("awaiting_input");
+            } else if (ev.event === "task.budget_updated") {
+              setBudgetSummary((prev) => ({
+                taskCostCents:
+                  typeof parsed.task_cost_cents === "number"
+                    ? parsed.task_cost_cents
+                    : (prev?.taskCostCents ?? 0),
+                maxTaskCostCents:
+                  typeof parsed.max_task_cost_cents === "number"
+                    ? parsed.max_task_cost_cents
+                    : (prev?.maxTaskCostCents ?? 500),
+                tokensUsed:
+                  typeof parsed.tokens_used === "number"
+                    ? parsed.tokens_used
+                    : (prev?.tokensUsed ?? 0),
+                orgMonthCostCents:
+                  typeof parsed.org_month_cost_cents === "number"
+                    ? parsed.org_month_cost_cents
+                    : prev?.orgMonthCostCents,
+                maxMonthlyOrgCostCents:
+                  typeof parsed.max_monthly_org_cost_cents === "number"
+                    ? parsed.max_monthly_org_cost_cents
+                    : prev?.maxMonthlyOrgCostCents,
+                partialDiff: prev?.partialDiff ?? null,
+              }));
             } else if (ev.event === "task.interrupted") {
               const prompt =
                 typeof parsed.prompt === "string"
@@ -333,10 +445,20 @@ export function useTaskStream({
               setStatus("awaiting_input");
             } else if (ev.event === "task.resumed") {
               setInterruption(null);
+              setPendingApproval(null);
               setStatus("in_progress");
             } else if (ev.event === "task.status") {
               const nextStatus =
                 typeof parsed.status === "string" ? parsed.status : "";
+              const nextReason =
+                typeof parsed.failure_reason === "string"
+                  ? parsed.failure_reason
+                  : typeof parsed.reason === "string"
+                    ? parsed.reason
+                    : null;
+              if (nextReason) {
+                setFailureReason(nextReason);
+              }
               if (nextStatus) {
                 setStatus(nextStatus);
                 if (
@@ -344,6 +466,8 @@ export function useTaskStream({
                   nextStatus === "failed" ||
                   nextStatus === "cancelled"
                 ) {
+                  setPendingApproval(null);
+                  setInterruption(null);
                   terminalStatusReached = true;
                   setIsStreaming(false);
                 }
@@ -449,6 +573,65 @@ export function useTaskStream({
     [authToken, baseUrl, getToken, taskId]
   );
 
+  const decideApproval = React.useCallback(
+    async (
+      approvalId: string,
+      decision: "approved" | "rejected",
+      note?: string
+    ): Promise<{ ok: boolean; error?: string }> => {
+      try {
+        const token = await resolveBearerToken(getToken, authToken);
+        const res = await fetch(
+          `${baseUrl}/api/v1/tasks/${taskId}/approvals/${approvalId}/decision`,
+          {
+            method: "POST",
+            credentials: "include",
+            headers: {
+              "Content-Type": "application/json",
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({
+              decision,
+              note: note?.trim() || undefined,
+            }),
+          }
+        );
+        if (res.status === 403 && typeof res.json === "function") {
+          const payload = (await res.json().catch(() => null)) as {
+            detail?: { code?: string; message?: string } | string;
+          } | null;
+          const detail = extractOrgForbiddenDetail(payload);
+          if (detail) dispatchOrgForbiddenEvent(detail);
+          const msg =
+            typeof payload?.detail === "object" && payload?.detail?.message
+              ? payload.detail.message
+              : "Organization admin role (org:admin) is required.";
+          return { ok: false, error: msg };
+        }
+        if (!res.ok) {
+          const payload = (await res.json().catch(() => null)) as {
+            detail?: string;
+          } | null;
+          return {
+            ok: false,
+            error: payload?.detail || `Request failed (${res.status})`,
+          };
+        }
+
+        setPendingApproval(null);
+        setInterruption(null);
+        setStatus(decision === "approved" ? "in_progress" : "failed");
+        if (decision === "rejected") {
+          setFailureReason("approval_rejected");
+        }
+        return { ok: true };
+      } catch {
+        return { ok: false, error: "Unable to reach agent engine." };
+      }
+    },
+    [authToken, baseUrl, getToken, taskId]
+  );
+
   const abort = React.useCallback(
     async (reason = "Operator cancelled execution"): Promise<boolean> => {
       try {
@@ -487,12 +670,16 @@ export function useTaskStream({
     logs,
     steps,
     interruption,
+    pendingApproval,
+    budgetSummary,
+    failureReason,
     status,
     isStreaming,
     error,
     hydrateSnapshot,
     intervene,
     respond,
+    decideApproval,
     abort,
     connect,
     disconnect,

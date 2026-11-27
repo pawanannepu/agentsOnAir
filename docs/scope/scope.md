@@ -19,7 +19,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 5 | Core autonomous engineer and reviewer loop | Slice 1 | in-progress |
 | 6 | Full repository context code reviewer | Slice 2 | in-progress |
 | 7 | Live task streaming & interactive collaboration | Slice 3 | in-progress |
-| 8 | Guardrails, branch protection & budget limits | Slice 4 | planned |
+| 8 | Guardrails, branch protection & budget limits | Slice 4 | in-progress |
 | 9 | Custom review rules & feedback learning | Slice 5 | planned |
 
 ## Foundations
@@ -145,10 +145,21 @@ spec [0006](../specs/0006-live-task-streaming-and-interactive-collaboration/inde
 
 ## Slice 4: Guardrails, branch protection & budget limits
 
-### 8. Guardrails, branch protection & budget limits · needs a decision
+### 8. Guardrails, branch protection & budget limits
 Enforce least privilege repository access, block direct pushes to protected branches, require human approvals for risky actions, and enforce task runtime and spending caps.
 **Done when:** risky actions pause for human approval, protected branches reject direct pushes, and tasks halt when spending or time limits are reached.
-- [ ] Design it (spec): `/architect guardrails, branch protection & budget limits`
+spec [0008](../specs/0008-guardrails-branch-protection-and-budget-limits/index.md) · code in `apps/agent/`, `apps/web/`
+- [x] Design it (spec): `/architect guardrails, branch protection & budget limits`
+- [x] Build it: /develop guardrails, branch protection & budget limits
+  - [x] Database migration, PolicyEvaluator, and ceiling cent UsageTracker core (AC-1, AC-2, AC-3, AC-5, AC-6)
+  - [x] Least privilege GitHub token split, sandbox pre-push hook, and host branch guard (AC-2)
+  - [x] LangGraph host publish node, idempotent approval interrupts, and budget/runtime halts (AC-2, AC-3, AC-4, AC-5, AC-6)
+  - [x] Guardrails, usage, repository override, and approval decision REST endpoints (AC-1, AC-4, AC-5)
+  - [x] Sandbox egress network isolation and console UI settings, repo drawer, and task approval/cost views (AC-7)
+- [x] Verify it: /check verify guardrails, branch protection & budget limits
+- [x] Test it: /test guardrails, branch protection & budget limits
+- [x] Review it (fresh model): /check review guardrails, branch protection & budget limits
+- [x] Document it: /document guardrails, branch protection & budget limits
 
 ## Slice 5: Custom review rules & feedback learning
 

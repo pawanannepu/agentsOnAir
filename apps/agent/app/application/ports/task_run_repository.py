@@ -29,6 +29,12 @@ class TaskRunRepository(Protocol):
         """Update execution run status without completing the run."""
         ...
 
+    async def increment_paused_seconds(
+        self, org_id: uuid.UUID, task_run_id: uuid.UUID, delta_seconds: int
+    ) -> TaskRun:
+        """Atomically accumulate paused seconds during awaiting_input."""
+        ...
+
     async def update_checkpoint(
         self,
         org_id: uuid.UUID,

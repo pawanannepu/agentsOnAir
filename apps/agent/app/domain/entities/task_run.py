@@ -21,6 +21,7 @@ class TaskRun:
     completion_tokens: int = 0
     tokens_used: int = 0
     estimated_cost_cents: int = 0
+    paused_seconds: int = 0
     started_at: datetime | None = None
     completed_at: datetime | None = None
     created_at: datetime | None = None

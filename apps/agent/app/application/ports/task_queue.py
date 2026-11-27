@@ -14,9 +14,9 @@ class TaskQueue(Protocol):
         task_id: uuid.UUID,
         task_run_id: uuid.UUID | None = None,
         intervention_id: uuid.UUID | None = None,
-        response: str | None = None,
+        response: str | dict | None = None,
     ) -> str | None:
-        """Enqueue a task resume job after human clarification is submitted."""
+        """Enqueue resume job after human clarification or approval."""
         ...
 
     async def schedule_interruption_watchdog(

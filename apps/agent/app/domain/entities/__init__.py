@@ -9,14 +9,17 @@ from app.domain.entities.repository import Repository
 from app.domain.entities.review_iteration import ReviewIteration
 from app.domain.entities.sandbox_run import SandboxRun
 from app.domain.entities.task import Task
+from app.domain.entities.task_approval import TaskApproval
 from app.domain.entities.task_intervention import TaskIntervention
 from app.domain.entities.task_run import TaskRun
 from app.domain.entities.task_transcript import TaskTranscript
+from app.domain.entities.usage import OrgMonthlyUsage, UsageEvent, UsageRecordResult
 
 __all__ = [
     "AuditLog",
     "Credential",
     "CredentialMetadata",
+    "OrgMonthlyUsage",
     "Organization",
     "PRReviewFinding",
     "PullRequestReview",
@@ -24,7 +27,10 @@ __all__ = [
     "ReviewIteration",
     "SandboxRun",
     "Task",
+    "TaskApproval",
     "TaskIntervention",
     "TaskRun",
     "TaskTranscript",
+    "UsageEvent",
+    "UsageRecordResult",
 ]

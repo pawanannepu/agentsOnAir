@@ -84,6 +84,13 @@ class InMemoryRepositoryRepository(RepositoryRepository):
     async def soft_delete(self, org_id: uuid.UUID, repo_id: uuid.UUID) -> None:
         pass
 
+    async def update_config(
+        self, org_id: uuid.UUID, repo_id: uuid.UUID, config: dict
+    ) -> Repository:
+        repo = await self.get_by_id(org_id, repo_id)
+        repo.config = config
+        return repo
+
 
 class InMemoryTaskRepository(TaskRepository):
     """In-memory stub for TaskRepository."""
@@ -402,6 +409,8 @@ class MockGitHubService(GitHubGateway):
         commit_message: str,
         token: str,
         diff_text: str | None = None,
+        protected_branches=None,
+        force: bool = False,
     ) -> str:
         return "mockcommitsha" + "0" * 27
 
@@ -413,6 +422,7 @@ class MockGitHubService(GitHubGateway):
         title: str,
         body: str,
         token: str,
+        protected_branches=None,
     ) -> dict[str, str | int]:
         return {"pr_url": "https://github.com/org/repo/pull/1", "pr_number": 1}
 

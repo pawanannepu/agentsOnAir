@@ -26,6 +26,20 @@ def _get_jwk_client(jwks_url: str) -> PyJWKClient:
     return PyJWKClient(jwks_url, cache_keys=True, lifespan=3600)
 
 
+def _normalize_org_role(raw_role: Any) -> str | None:
+    """Normalize Clerk v2 compact roles (e.g. 'admin') to canonical 'org:*' format."""
+    if raw_role is None:
+        return None
+    role = str(raw_role).strip()
+    if not role:
+        return None
+    if role == "admin":
+        return "org:admin"
+    if role in ("member", "basic_member"):
+        return "org:member"
+    return role
+
+
 def verify_clerk_jwt(
     token: str,
     *,
@@ -76,11 +90,11 @@ def verify_clerk_jwt(
     nested_org_role = org_claim.get("rol") if isinstance(org_claim, dict) else None
 
     clerk_org_id = claims.get("org_id") or nested_org_id
-    org_role = claims.get("org_role") or nested_org_role
+    raw_org_role = claims.get("org_role") or nested_org_role
 
     return ClerkUserContext(
         user_id=user_id,
         clerk_org_id=str(clerk_org_id) if clerk_org_id else None,
-        org_role=str(org_role) if org_role else None,
+        org_role=_normalize_org_role(raw_org_role),
         claims=dict(claims),
     )

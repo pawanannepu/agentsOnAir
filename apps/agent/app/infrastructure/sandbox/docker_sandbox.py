@@ -6,12 +6,15 @@ import shutil
 import tempfile
 import time
 import uuid
+from collections.abc import Sequence
 
 from app.application.ports.sandbox import (
     SandboxExecutionResult,
     SandboxProvider,
     SandboxSession,
 )
+from app.domain.exceptions import GuardrailBlockedError
+from app.infrastructure.sandbox.mock_sandbox import collect_workspace_diff
 
 
 class DockerSandboxSession(SandboxSession):
@@ -23,13 +26,22 @@ class DockerSandboxSession(SandboxSession):
         workspace_dir: str,
         container_name: str | None = None,
         timeout_seconds: int = 600,
+        network_egress_mode: str = "off_after_install",
+        allowed_egress_domains: Sequence[str] | None = None,
     ) -> None:
         self._id = sandbox_id
         self._workspace_dir = workspace_dir
+        self._meta_dir = tempfile.mkdtemp(prefix=f"aon_docker_meta_{sandbox_id}_")
+        self._system_gitconfig = os.path.join(self._meta_dir, "gitconfig")
+        with open(self._system_gitconfig, "a", encoding="utf-8"):
+            pass
         self._container_name = container_name
         self._active = True
         self._timeout_seconds = timeout_seconds
         self._timeout_extensions: list[int] = []
+        self._network_egress_mode = network_egress_mode
+        self._allowed_egress_domains = list(allowed_egress_domains or [])
+        self._network_restricted = False
 
     @property
     def id(self) -> str:
@@ -38,6 +50,28 @@ class DockerSandboxSession(SandboxSession):
     @property
     def provider(self) -> str:
         return "docker"
+
+    @property
+    def network_egress_mode(self) -> str:
+        return self._network_egress_mode
+
+    @property
+    def allowed_egress_domains(self) -> list[str]:
+        return list(self._allowed_egress_domains)
+
+    @property
+    def network_restricted(self) -> bool:
+        return self._network_restricted
+
+    def _resolve_workspace_path(self, path: str) -> str:
+        root = os.path.realpath(self._workspace_dir)
+        candidate = os.path.realpath(os.path.join(root, path))
+        if candidate != root and not candidate.startswith(root + os.sep):
+            raise GuardrailBlockedError(
+                f"Path '{path}' escapes sandbox workspace",
+                reason="path_traversal_blocked",
+            )
+        return candidate
 
     async def execute_command(
         self,
@@ -49,6 +83,7 @@ class DockerSandboxSession(SandboxSession):
             raise RuntimeError("Sandbox session has been terminated")
 
         full_env = os.environ.copy()
+        full_env["GIT_CONFIG_SYSTEM"] = self._system_gitconfig
         if env:
             full_env.update(env)
 
@@ -83,14 +118,14 @@ class DockerSandboxSession(SandboxSession):
     async def read_file(self, path: str) -> str:
         if not self._active:
             raise RuntimeError("Sandbox session has been terminated")
-        full_path = os.path.join(self._workspace_dir, path)
+        full_path = self._resolve_workspace_path(path)
         with open(full_path, encoding="utf-8") as f:
             return f.read()
 
     async def write_file(self, path: str, content: str) -> None:
         if not self._active:
             raise RuntimeError("Sandbox session has been terminated")
-        full_path = os.path.join(self._workspace_dir, path)
+        full_path = self._resolve_workspace_path(path)
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
         with open(full_path, "w", encoding="utf-8") as f:
             f.write(content)
@@ -98,7 +133,7 @@ class DockerSandboxSession(SandboxSession):
     async def list_files(self, directory: str = ".") -> list[str]:
         if not self._active:
             raise RuntimeError("Sandbox session has been terminated")
-        target_dir = os.path.join(self._workspace_dir, directory)
+        target_dir = self._resolve_workspace_path(directory)
         file_list: list[str] = []
         for root, _, files in os.walk(target_dir):
             if ".git" in root:
@@ -111,10 +146,7 @@ class DockerSandboxSession(SandboxSession):
     async def get_diff(self) -> str:
         if not self._active:
             raise RuntimeError("Sandbox session has been terminated")
-        res = await self.execute_command("git diff HEAD")
-        if not res.stdout.strip():
-            res = await self.execute_command("git diff")
-        return res.stdout
+        return await collect_workspace_diff(self.execute_command)
 
     @property
     def timeout_seconds(self) -> int:
@@ -126,10 +158,37 @@ class DockerSandboxSession(SandboxSession):
         self._timeout_seconds = timeout_seconds
         self._timeout_extensions.append(timeout_seconds)
 
+    async def restrict_network(
+        self,
+        mode: str,
+        allowed_domains: Sequence[str] | None = None,
+    ) -> None:
+        if not self._active:
+            raise RuntimeError("Sandbox session has been terminated")
+        domains = list(allowed_domains or [])
+        self._network_egress_mode = mode
+        self._allowed_egress_domains = domains
+        self._network_restricted = mode in ("off_after_install", "allowlist")
+
+        if self._container_name and (
+            mode == "off_after_install" or (mode == "allowlist" and len(domains) == 0)
+        ):
+            proc = await asyncio.create_subprocess_exec(
+                "docker",
+                "network",
+                "disconnect",
+                "bridge",
+                self._container_name,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await proc.communicate()
+
     async def terminate(self) -> None:
         if self._active:
             self._active = False
             shutil.rmtree(self._workspace_dir, ignore_errors=True)
+            shutil.rmtree(self._meta_dir, ignore_errors=True)
 
 
 class DockerSandboxProvider(SandboxProvider):
@@ -141,11 +200,19 @@ class DockerSandboxProvider(SandboxProvider):
         task_id: uuid.UUID,
         memory_limit_mb: int = 2048,
         timeout_seconds: int = 600,
+        network_egress_mode: str = "off_after_install",
+        allowed_egress_domains: Sequence[str] | None = None,
     ) -> SandboxSession:
         sandbox_id = f"docker_{uuid.uuid4().hex[:12]}"
         temp_dir = tempfile.mkdtemp(prefix=f"aon_docker_{task_id.hex[:6]}_")
 
-        session = DockerSandboxSession(sandbox_id, temp_dir)
+        session = DockerSandboxSession(
+            sandbox_id,
+            temp_dir,
+            timeout_seconds=timeout_seconds,
+            network_egress_mode=network_egress_mode,
+            allowed_egress_domains=allowed_egress_domains,
+        )
         await session.execute_command("git init")
         await session.execute_command("git config user.name 'agentsonair[bot]'")
         await session.execute_command("git config user.email 'bot@agentsonair.dev'")

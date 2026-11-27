@@ -13,6 +13,10 @@ class ForgeResult:
     steps_taken: int
     test_output: str
     diff: str
+    provider: str = "anthropic"
+    model: str = "claude-sonnet-4"
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
 
 
 @dataclass(slots=True)
@@ -35,6 +39,10 @@ class ReviewerResult:
     findings: list[dict]
     blocking_count: int
     non_blocking_count: int
+    provider: str = "anthropic"
+    model: str = "claude-sonnet-4"
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
 
 
 class ForgeAgent(Protocol):

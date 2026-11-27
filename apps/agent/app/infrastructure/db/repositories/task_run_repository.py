@@ -27,6 +27,7 @@ def _to_entity(model: TaskRunModel) -> TaskRun:
         completion_tokens=model.completion_tokens,
         tokens_used=model.tokens_used,
         estimated_cost_cents=model.estimated_cost_cents,
+        paused_seconds=model.paused_seconds,
         started_at=model.started_at,
         completed_at=model.completed_at,
         created_at=model.created_at,
@@ -120,6 +121,24 @@ class SqlAlchemyTaskRunRepository(TaskRunRepository):
         model.status = status
         model.updated_at = datetime.now(UTC)
         await self._session.flush()
+        return _to_entity(model)
+
+    async def increment_paused_seconds(
+        self, org_id: uuid.UUID, task_run_id: uuid.UUID, delta_seconds: int
+    ) -> TaskRun:
+        stmt = select(TaskRunModel).where(
+            TaskRunModel.org_id == org_id,
+            TaskRunModel.id == task_run_id,
+        )
+        model = (await self._session.execute(stmt)).scalar_one_or_none()
+        if not model:
+            raise NotFoundError(
+                f"TaskRun {task_run_id} not found in tenant organization"
+            )
+        if delta_seconds > 0:
+            model.paused_seconds += delta_seconds
+            model.updated_at = datetime.now(UTC)
+            await self._session.flush()
         return _to_entity(model)
 
     async def update_checkpoint(

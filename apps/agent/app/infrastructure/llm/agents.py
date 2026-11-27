@@ -12,8 +12,13 @@ from app.application.services.sandbox_workspace import SandboxWorkspace
 class ForgeCoderAgent(ForgeAgent):
     """Forge autonomous engineering node executing an inner tool loop."""
 
-    def __init__(self, api_key: str | None = None) -> None:
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str = "claude-sonnet-4",
+    ) -> None:
         self._api_key = api_key
+        self._model = model
 
     async def run_cycle(
         self,
@@ -26,8 +31,6 @@ class ForgeCoderAgent(ForgeAgent):
 
         test_command = task_context.get("test_command", "pytest")
         file_path = task_context.get("target_file", "src/module.py")
-
-        # Inner ReAct iteration
         steps_taken = 0
 
         # Step 1: Read existing target file if present
@@ -37,24 +40,43 @@ class ForgeCoderAgent(ForgeAgent):
         except Exception:
             content = ""
 
-        # Step 2: Apply fixes or implement changes
+        # Step 2: Apply fixes or implement changes idempotently across replays
         if previous_review and previous_review.get("findings"):
-            # Second/third cycle: apply fixes according to reviewer feedback
             findings = previous_review["findings"]
             suggested_fix = findings[0].get("suggested_fix", "# fixed issue")
-            new_content = f"{content}\n# Fix applied: {suggested_fix}\n"
+            marker = f"# Fix applied: {suggested_fix}"
+            if marker in content:
+                new_content = content
+            else:
+                new_content = f"{content}\n{marker}\n"
             summary = f"Applied requested fix: {suggested_fix}"
         else:
-            # First cycle: initial implementation
             title = task_context.get("title", "Feature")
-            new_content = (
-                f"{content}\n# Implemented: {title}\ndef solution():\n    return True\n"
-            )
+            marker = f"# Implemented: {title}"
+            if marker in content:
+                new_content = content
+            else:
+                new_content = f"{content}\n{marker}\ndef solution():\n    return True\n"
             summary = f"Implemented initial solution for: {title}"
 
-        # Step 3: Write modified code to workspace
-        await workspace.write_file(file_path, new_content)
+        # Step 3: Write modified code to workspace (idempotent if already written)
+        if new_content != content:
+            await workspace.write_file(file_path, new_content)
         steps_taken += 1
+
+        # Optional risky tool actions requested by context (checked by PolicyEvaluator)
+        risky_command = task_context.get("risky_command")
+        if isinstance(risky_command, str) and risky_command.strip():
+            await workspace.run_command(risky_command)
+            steps_taken += 1
+
+        risky_write_path = task_context.get("risky_write_path")
+        if isinstance(risky_write_path, str) and risky_write_path.strip():
+            risky_content = str(
+                task_context.get("risky_write_content", "# automated config\n")
+            )
+            await workspace.write_file(risky_write_path, risky_content)
+            steps_taken += 1
 
         # Step 4: Run repository test suite
         test_res = await workspace.run_test(test_command)
@@ -64,20 +86,39 @@ class ForgeCoderAgent(ForgeAgent):
         diff = await workspace.get_diff()
         steps_taken += 1
 
+        model_name = str(task_context.get("simulated_model") or self._model)
+        prompt_tokens = int(
+            task_context.get("simulated_prompt_tokens")
+            or max(250, len(content) // 4 + 250)
+        )
+        completion_tokens = int(
+            task_context.get("simulated_completion_tokens")
+            or max(120, len(new_content) // 4 + 100)
+        )
+
         return ForgeResult(
             completed=True,
             summary=summary,
             steps_taken=steps_taken,
             test_output=test_res.stdout or test_res.stderr,
             diff=diff,
+            provider="anthropic",
+            model=model_name,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
         )
 
 
 class ReviewerCriticAgent(ReviewerCritic):
     """Reviewer independent critic node evaluating diffs with severity scoring."""
 
-    def __init__(self, api_key: str | None = None) -> None:
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str = "claude-sonnet-4",
+    ) -> None:
         self._api_key = api_key
+        self._model = model
 
     async def evaluate(
         self,
@@ -87,7 +128,6 @@ class ReviewerCriticAgent(ReviewerCritic):
     ) -> ReviewerResult:
         findings: list[dict] = []
 
-        # Check simulation triggers in task_context for test scenarios
         force_critical = task_context.get("force_review_critical", False)
         target_file = task_context.get("target_file", "src/module.py")
 
@@ -130,10 +170,24 @@ class ReviewerCriticAgent(ReviewerCritic):
                 f"Reviewer identified {blocking_count} blocking issue(s) to repair."
             )
 
+        model_name = str(task_context.get("simulated_model") or self._model)
+        prompt_tokens = int(
+            task_context.get("simulated_reviewer_prompt_tokens")
+            or max(200, len(diff) // 4 + 150)
+        )
+        completion_tokens = int(
+            task_context.get("simulated_reviewer_completion_tokens")
+            or max(80, len(summary) // 4 + 60)
+        )
+
         return ReviewerResult(
             verdict=verdict,
             summary=summary,
             findings=findings,
             blocking_count=blocking_count,
             non_blocking_count=non_blocking_count,
+            provider="anthropic",
+            model=model_name,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
         )

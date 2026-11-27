@@ -15,6 +15,9 @@ import {
   CheckCircle2,
   AlertCircle,
   Loader2,
+  ShieldAlert,
+  DollarSign,
+  XCircle,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,7 +31,12 @@ import {
   dispatchOrgForbiddenEvent,
   extractOrgForbiddenDetail,
 } from "@/lib/org-recovery";
-import { useTaskStream, type StepEvent } from "@/lib/use-task-stream";
+import {
+  useTaskStream,
+  type BudgetSummaryState,
+  type PendingApprovalState,
+  type StepEvent,
+} from "@/lib/use-task-stream";
 
 const mockLogLines = [
   "\u001b[32m[sandbox:init]\u001b[0m Provisioning E2B Firecracker microVM (uuid: vm_01j982a)...",
@@ -72,13 +80,19 @@ const defaultWorkflowSteps: StepEvent[] = [
 export interface TaskDetailClientProps {
   taskId: string;
   orgId?: string;
+  isAdmin?: boolean;
   authToken?: string;
   getToken?: () => Promise<string | null>;
+}
+
+function formatCents(cents: number): string {
+  return `$${(cents / 100).toFixed(2)}`;
 }
 
 export function TaskDetailClient({
   taskId,
   orgId,
+  isAdmin = false,
   authToken,
   getToken,
 }: TaskDetailClientProps) {
@@ -91,12 +105,16 @@ export function TaskDetailClient({
     logs,
     steps,
     interruption,
+    pendingApproval,
+    budgetSummary,
+    failureReason,
     status,
     isStreaming,
     error,
     hydrateSnapshot,
     intervene,
     respond,
+    decideApproval,
     abort,
   } = useTaskStream({
     taskId,
@@ -114,6 +132,8 @@ export function TaskDetailClient({
   const [selectedOption, setSelectedOption] = React.useState<string | null>(
     null
   );
+  const [approvalNote, setApprovalNote] = React.useState("");
+  const [isDecidingApproval, setIsDecidingApproval] = React.useState(false);
   const [isResponding, setIsResponding] = React.useState(false);
   const [isAborting, setIsAborting] = React.useState(false);
   const [phaseTab, setPhaseTab] = React.useState<"all" | "setup" | "execution">(
@@ -170,6 +190,21 @@ export function TaskDetailClient({
           interruption_type?: string | null;
           interruption_options?: string[] | null;
           interruption_expires_at?: string | null;
+          pending_approval?: {
+            approval_id: string;
+            risk_category: string;
+            action_type: string;
+            action_summary: string;
+            action_payload: Record<string, unknown>;
+            expires_at: string;
+          } | null;
+          budget_summary?: {
+            task_cost_cents: number;
+            max_task_cost_cents: number;
+            tokens_used: number;
+            partial_diff?: string | null;
+          } | null;
+          runs?: Array<{ failure_reason?: string | null }>;
         };
         if (!active) {
           return;
@@ -192,6 +227,32 @@ export function TaskDetailClient({
                 interruptionType: data.interruption_type ?? undefined,
                 expiresAt: data.interruption_expires_at ?? undefined,
               }
+            : null;
+
+        const hydratedApproval: PendingApprovalState | null =
+          data.pending_approval
+            ? {
+                approvalId: data.pending_approval.approval_id,
+                riskCategory: data.pending_approval.risk_category,
+                actionType: data.pending_approval.action_type,
+                actionSummary: data.pending_approval.action_summary,
+                actionPayload: data.pending_approval.action_payload || {},
+                expiresAt: data.pending_approval.expires_at,
+              }
+            : null;
+
+        const hydratedBudget: BudgetSummaryState | null = data.budget_summary
+          ? {
+              taskCostCents: data.budget_summary.task_cost_cents,
+              maxTaskCostCents: data.budget_summary.max_task_cost_cents,
+              tokensUsed: data.budget_summary.tokens_used,
+              partialDiff: data.budget_summary.partial_diff ?? null,
+            }
+          : null;
+
+        const latestRunReason =
+          data.runs && data.runs.length > 0
+            ? (data.runs[data.runs.length - 1]?.failure_reason ?? null)
             : null;
 
         let transcriptLines: string[] | undefined;
@@ -224,6 +285,9 @@ export function TaskDetailClient({
           hydrateSnapshot({
             status: data.status,
             interruption: hydratedInterruption,
+            pendingApproval: hydratedApproval,
+            budgetSummary: hydratedBudget,
+            failureReason: latestRunReason,
             logs: transcriptLines,
           });
         }
@@ -362,6 +426,27 @@ export function TaskDetailClient({
     }
   };
 
+  const handleApprovalDecision = async (decision: "approved" | "rejected") => {
+    if (!pendingApproval) return;
+    setIsDecidingApproval(true);
+    const res = await decideApproval(
+      pendingApproval.approvalId,
+      decision,
+      approvalNote
+    );
+    setIsDecidingApproval(false);
+    if (res.ok) {
+      toast.success(
+        decision === "approved"
+          ? "Action approved. Agent task resumed."
+          : "Action rejected. Task execution terminated."
+      );
+      setApprovalNote("");
+    } else {
+      toast.error(res.error || "Failed to record approval decision.");
+    }
+  };
+
   const displaySteps = steps.length > 0 ? steps : defaultWorkflowSteps;
   const filteredSteps = React.useMemo(() => {
     if (phaseTab === "all") return displaySteps;
@@ -380,7 +465,17 @@ export function TaskDetailClient({
     );
   }, [displaySteps, phaseTab]);
 
+  const isApprovalGate =
+    Boolean(pendingApproval) || interruption?.interruptionType === "approval";
+
   const renderBadge = () => {
+    if (isApprovalGate) {
+      return (
+        <Badge variant="awaiting_approval" pulse>
+          Awaiting Approval
+        </Badge>
+      );
+    }
     if (status === "awaiting_input" || interruption) {
       return (
         <Badge variant="waiting" pulse>
@@ -404,13 +499,28 @@ export function TaskDetailClient({
     );
   };
 
+  const effectiveBudget = budgetSummary ?? {
+    taskCostCents: 0,
+    maxTaskCostCents: 500,
+    tokensUsed: 0,
+    partialDiff: null,
+  };
+  const costPct = Math.min(
+    100,
+    Math.round(
+      (effectiveBudget.taskCostCents /
+        Math.max(1, effectiveBudget.maxTaskCostCents)) *
+        100
+    )
+  );
+
   return (
     <div className="space-y-6">
       {/* Top Navigation & Actions Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-4">
         <div className="flex items-center gap-3">
           <Button asChild variant="ghost" size="icon" className="h-8 w-8">
-            <Link href="/tasks">
+            <Link href="/tasks" aria-label="Back to tasks">
               <ArrowLeft className="h-4 w-4" />
             </Link>
           </Button>
@@ -449,8 +559,84 @@ export function TaskDetailClient({
         </div>
       </div>
 
+      {/* Approval Gate Card (org:admin required) */}
+      {isApprovalGate && (
+        <Card className="border-rose-500/40 bg-rose-500/10 shadow-lg">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-rose-300">
+                <ShieldAlert className="h-5 w-5" />
+                <CardTitle className="text-sm font-semibold">
+                  Guardrail Approval Required
+                </CardTitle>
+              </div>
+              {pendingApproval && (
+                <Badge variant="awaiting_approval">
+                  {pendingApproval.riskCategory}
+                </Badge>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3 text-xs">
+            <p className="text-sm text-foreground font-medium">
+              {pendingApproval?.actionSummary || interruption?.prompt}
+            </p>
+            {pendingApproval && (
+              <pre className="rounded-md bg-background/80 border border-border p-3 font-mono text-[11px] overflow-x-auto text-muted-foreground">
+                {JSON.stringify(pendingApproval.actionPayload, null, 2)}
+              </pre>
+            )}
+
+            {isAdmin && pendingApproval ? (
+              <div className="space-y-3 pt-1">
+                <Input
+                  value={approvalNote}
+                  onChange={(e) => setApprovalNote(e.target.value)}
+                  placeholder="Optional audit note for this decision..."
+                  aria-label="Approval decision note"
+                  className="bg-background/80 text-xs"
+                />
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={isDecidingApproval}
+                    onClick={() => void handleApprovalDecision("approved")}
+                    className="gap-1.5 bg-emerald-600 text-white hover:bg-emerald-500"
+                  >
+                    {isDecidingApproval ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                    )}
+                    <span>Approve Action</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="destructive"
+                    disabled={isDecidingApproval}
+                    onClick={() => void handleApprovalDecision("rejected")}
+                    className="gap-1.5"
+                  >
+                    <XCircle className="h-3.5 w-3.5" />
+                    <span>Reject Action</span>
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-[11px] text-amber-300">
+                An organization administrator (
+                <code className="font-mono">org:admin</code>) must approve or
+                reject this risky action before execution can continue.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Human in the loop Clarification Banner */}
-      {interruption && (
+      {interruption && !isApprovalGate && (
         <Card className="border-amber-500/40 bg-amber-500/10 shadow-lg">
           <CardHeader className="pb-3">
             <div className="flex items-center gap-2 text-amber-400">
@@ -519,7 +705,7 @@ export function TaskDetailClient({
 
       {/* Split Pane: Metadata & Steps on Left, Terminal & Guidance on Right */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left Pane: Metadata and Execution Steps */}
+        {/* Left Pane: Metadata, Cost Meter, and Execution Steps */}
         <div className="lg:col-span-4 space-y-4">
           <Card>
             <CardHeader className="pb-3">
@@ -568,9 +754,64 @@ export function TaskDetailClient({
                   Agent Model
                 </span>
                 <span className="font-mono text-foreground">
-                  gemini-1.5-pro
+                  claude-sonnet-4
                 </span>
               </div>
+            </CardContent>
+          </Card>
+
+          {/* Live Task Cost & Budget Meter */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
+                <DollarSign className="h-4 w-4 text-emerald-400" />
+                Budget & Usage Meter
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2.5 text-xs">
+              <div className="flex items-center justify-between font-mono">
+                <span className="text-foreground font-medium">
+                  {formatCents(effectiveBudget.taskCostCents)} /{" "}
+                  {formatCents(effectiveBudget.maxTaskCostCents)}
+                </span>
+                <span className="text-muted-foreground">
+                  {effectiveBudget.tokensUsed.toLocaleString()} tokens
+                </span>
+              </div>
+              <div
+                role="progressbar"
+                aria-label="Task budget usage"
+                aria-valuemin={0}
+                aria-valuemax={effectiveBudget.maxTaskCostCents}
+                aria-valuenow={effectiveBudget.taskCostCents}
+                className="h-2 w-full rounded-full bg-secondary overflow-hidden"
+              >
+                <div
+                  className={
+                    costPct >= 90
+                      ? "h-full bg-destructive transition-all"
+                      : costPct >= 70
+                        ? "h-full bg-amber-500 transition-all"
+                        : "h-full bg-emerald-500 transition-all"
+                  }
+                  style={{ width: `${costPct}%` }}
+                />
+              </div>
+              {failureReason && (
+                <div className="rounded border border-rose-500/40 bg-rose-500/10 px-2.5 py-1.5 text-[11px] font-mono text-rose-300">
+                  Halted: {failureReason}
+                </div>
+              )}
+              {effectiveBudget.partialDiff && (
+                <details className="pt-1">
+                  <summary className="cursor-pointer text-[11px] text-muted-foreground hover:text-foreground">
+                    View Preserved Partial Diff
+                  </summary>
+                  <pre className="mt-2 max-h-40 overflow-auto rounded border border-border bg-background p-2 font-mono text-[10px] text-muted-foreground">
+                    {effectiveBudget.partialDiff}
+                  </pre>
+                </details>
+              )}
             </CardContent>
           </Card>
 

@@ -14,10 +14,22 @@ async function TaskDetailContent({
   const taskId = resolvedParams.id || "018f6c38-8921-7000-8000-000000000001";
 
   if (isClerkPublishableKeyConfigured() && !session.isPlaceholderBypass) {
-    return <ClerkTaskDetail taskId={taskId} initialOrgId={session.orgId} />;
+    return (
+      <ClerkTaskDetail
+        taskId={taskId}
+        initialOrgId={session.orgId}
+        isAdmin={session.isAdmin}
+      />
+    );
   }
 
-  return <TaskDetailClient taskId={taskId} orgId={session.orgId} />;
+  return (
+    <TaskDetailClient
+      taskId={taskId}
+      orgId={session.orgId}
+      isAdmin={session.isAdmin}
+    />
+  );
 }
 
 export default function TaskDetailPage({
