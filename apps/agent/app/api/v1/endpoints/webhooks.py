@@ -29,6 +29,9 @@ from app.infrastructure.db.repositories.pr_review_repository import (
 from app.infrastructure.db.repositories.repository_repository import (
     SqlAlchemyRepositoryRepository,
 )
+from app.infrastructure.db.repositories.review_feedback_repository import (
+    SqlAlchemyReviewFeedbackRepository,
+)
 from app.infrastructure.db.repositories.task_repository import (
     SqlAlchemyTaskRepository,
 )
@@ -56,6 +59,7 @@ async def handle_github_webhook(
     repo_repo = SqlAlchemyRepositoryRepository(db)
     task_repo = SqlAlchemyTaskRepository(db)
     pr_review_repo = SqlAlchemyPRReviewRepository(db)
+    review_feedback_repo = SqlAlchemyReviewFeedbackRepository(db)
     github_gateway = GitHubService(
         app_id=settings.GITHUB_APP_ID,
         private_key=settings.GITHUB_APP_PRIVATE_KEY,
@@ -65,6 +69,7 @@ async def handle_github_webhook(
         task_repo=task_repo,
         pr_review_repo=pr_review_repo,
         github_gateway=github_gateway,
+        review_feedback_repo=review_feedback_repo,
     )
 
     try:

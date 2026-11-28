@@ -7,7 +7,16 @@ from app.infrastructure.db.models.organization import OrganizationModel
 from app.infrastructure.db.models.pr_review_finding import PRReviewFindingModel
 from app.infrastructure.db.models.pull_request_review import PullRequestReviewModel
 from app.infrastructure.db.models.repository import RepositoryModel
+from app.infrastructure.db.models.review_example import ReviewExampleModel
+from app.infrastructure.db.models.review_finding_feedback import (
+    ReviewFindingFeedbackModel,
+)
 from app.infrastructure.db.models.review_iteration import ReviewIterationModel
+from app.infrastructure.db.models.review_learned_preference import (
+    ReviewLearnedPreferenceModel,
+)
+from app.infrastructure.db.models.review_rule import ReviewRuleModel
+from app.infrastructure.db.models.review_rule_override import ReviewRuleOverrideModel
 from app.infrastructure.db.models.sandbox_run import SandboxRunModel
 from app.infrastructure.db.models.task import TaskModel
 from app.infrastructure.db.models.task_approval import TaskApprovalModel
@@ -24,7 +33,12 @@ __all__ = [
     "PRReviewFindingModel",
     "PullRequestReviewModel",
     "RepositoryModel",
+    "ReviewExampleModel",
+    "ReviewFindingFeedbackModel",
     "ReviewIterationModel",
+    "ReviewLearnedPreferenceModel",
+    "ReviewRuleModel",
+    "ReviewRuleOverrideModel",
     "SandboxRunModel",
     "TaskApprovalModel",
     "TaskModel",

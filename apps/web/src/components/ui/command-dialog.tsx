@@ -10,6 +10,8 @@ import {
   Settings,
   PlusCircle,
   FileCode2,
+  GitPullRequest,
+  BarChart3,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "./dialog";
 
@@ -89,6 +91,20 @@ export function CommandDialog({ open, onOpenChange }: CommandDialogProps) {
               >
                 <Terminal className="h-4 w-4 text-emerald-400" />
                 <span>All Tasks</span>
+              </CommandPrimitive.Item>
+              <CommandPrimitive.Item
+                onSelect={() => runCommand(() => router.push("/reviews"))}
+                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-foreground hover:bg-accent hover:text-accent-foreground data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground"
+              >
+                <GitPullRequest className="h-4 w-4 text-purple-400" />
+                <span>Pull Request Reviews</span>
+              </CommandPrimitive.Item>
+              <CommandPrimitive.Item
+                onSelect={() => runCommand(() => router.push("/analytics"))}
+                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-foreground hover:bg-accent hover:text-accent-foreground data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground"
+              >
+                <BarChart3 className="h-4 w-4 text-sky-400" />
+                <span>Quality & Turnaround Analytics</span>
               </CommandPrimitive.Item>
               <CommandPrimitive.Item
                 onSelect={() => runCommand(() => router.push("/repositories"))}

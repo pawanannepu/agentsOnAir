@@ -35,6 +35,7 @@ import {
   dispatchOrgForbiddenEvent,
   extractOrgForbiddenDetail,
 } from "@/lib/org-recovery";
+import { OrgReviewGuidelinesCard } from "@/components/settings/org-review-guidelines-card";
 
 export interface SettingsViewProps {
   canPersistToApi?: boolean;
@@ -693,6 +694,11 @@ export function SettingsView({
           </CardFooter>
         </Card>
       </form>
+
+      <OrgReviewGuidelinesCard
+        canPersistToApi={canPersistToApi}
+        getToken={getToken}
+      />
     </div>
   );
 }

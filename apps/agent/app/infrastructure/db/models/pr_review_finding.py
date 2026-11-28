@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     BigInteger,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -13,6 +14,7 @@ from sqlalchemy import (
     String,
     Text,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -21,6 +23,7 @@ from app.infrastructure.db.base import Base, uuid7
 
 if TYPE_CHECKING:
     from app.infrastructure.db.models.pull_request_review import PullRequestReviewModel
+    from app.infrastructure.db.models.review_rule import ReviewRuleModel
 
 
 class PRReviewFindingModel(Base):
@@ -87,6 +90,17 @@ class PRReviewFindingModel(Base):
         default="open",
         server_default="open",
     )
+    rule_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("review_rules.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    feedback_state: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="none",
+        server_default="none",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -95,11 +109,23 @@ class PRReviewFindingModel(Base):
     )
 
     __table_args__ = (
+        CheckConstraint(
+            "feedback_state IN ('none', 'accepted', 'dismissed')",
+            name="ck_pr_review_findings_feedback_state",
+        ),
         Index("ix_pr_findings_review_severity", "review_id", "severity"),
         Index("ix_pr_findings_review_file", "review_id", "file_path"),
+        Index("ix_pr_findings_rule_feedback", "rule_id", "feedback_state"),
+        Index("ix_pr_findings_review_feedback", "review_id", "feedback_state"),
+        Index(
+            "ix_pr_findings_github_comment_id",
+            "github_comment_id",
+            postgresql_where=text("github_comment_id IS NOT NULL"),
+        ),
     )
 
     review: Mapped["PullRequestReviewModel"] = relationship(
         "PullRequestReviewModel",
         back_populates="findings",
     )
+    rule: Mapped["ReviewRuleModel | None"] = relationship("ReviewRuleModel")

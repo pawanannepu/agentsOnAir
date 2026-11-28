@@ -18,9 +18,12 @@ from app.application.ports.model_gateway import (
 )
 from app.application.ports.organization_repository import OrganizationRepository
 from app.application.ports.repository_repository import RepositoryRepository
+from app.application.ports.review_examples_repository import ReviewExamplesRepository
+from app.application.ports.review_feedback_repository import ReviewFeedbackRepository
 from app.application.ports.review_iteration_repository import (
     ReviewIterationRepository,
 )
+from app.application.ports.review_rules_repository import ReviewRulesRepository
 from app.application.ports.sandbox import SandboxProvider, SandboxSession
 from app.application.ports.sandbox_run_repository import SandboxRunRepository
 from app.application.ports.task_approval_repository import TaskApprovalRepository
@@ -34,6 +37,7 @@ from app.application.ports.task_transcript_repository import (
     TaskTranscriptRepository,
 )
 from app.application.ports.usage_repository import UsageRepository
+from app.application.services.review_context_service import ReviewContextService
 from app.application.services.sandbox_workspace import SandboxWorkspace
 from app.application.services.usage_tracker import UsageTracker
 from app.core.config import settings
@@ -54,6 +58,15 @@ from app.domain.services.policy_evaluator import (
 )
 from app.infrastructure.db.repositories.organization_repository import (
     SqlAlchemyOrganizationRepository,
+)
+from app.infrastructure.db.repositories.review_examples_repository import (
+    SqlAlchemyReviewExamplesRepository,
+)
+from app.infrastructure.db.repositories.review_feedback_repository import (
+    SqlAlchemyReviewFeedbackRepository,
+)
+from app.infrastructure.db.repositories.review_rules_repository import (
+    SqlAlchemyReviewRulesRepository,
 )
 from app.infrastructure.db.repositories.task_approval_repository import (
     SqlAlchemyTaskApprovalRepository,
@@ -93,6 +106,9 @@ class RunAutonomousLoopUseCase:
         organization_repo: OrganizationRepository | None = None,
         task_approval_repo: TaskApprovalRepository | None = None,
         usage_repo: UsageRepository | None = None,
+        review_rules_repo: ReviewRulesRepository | None = None,
+        review_examples_repo: ReviewExamplesRepository | None = None,
+        review_feedback_repo: ReviewFeedbackRepository | None = None,
     ) -> None:
         self._task_repo = task_repo
         self._task_run_repo = task_run_repo
@@ -126,6 +142,25 @@ class RunAutonomousLoopUseCase:
         self._usage_repo: UsageRepository = usage_repo or SqlAlchemyUsageRepository(
             session=session,
             isolated=(session is None),
+        )
+        self._review_rules_repo: ReviewRulesRepository | None = review_rules_repo or (
+            SqlAlchemyReviewRulesRepository(session) if session is not None else None
+        )
+        self._review_examples_repo: ReviewExamplesRepository | None = (
+            review_examples_repo
+            or (
+                SqlAlchemyReviewExamplesRepository(session)
+                if session is not None
+                else None
+            )
+        )
+        self._review_feedback_repo: ReviewFeedbackRepository | None = (
+            review_feedback_repo
+            or (
+                SqlAlchemyReviewFeedbackRepository(session)
+                if session is not None
+                else None
+            )
         )
         self._usage_tracker = UsageTracker(self._usage_repo)
 
@@ -785,6 +820,78 @@ class RunAutonomousLoopUseCase:
 
             guidance_messages = await self._collect_guidance_messages(org_id, task.id)
 
+            custom_rules_ctx: list[dict[str, Any]] = []
+            team_prefs_ctx: list[dict[str, Any]] = []
+            example_prs_ctx: list[dict[str, Any]] = []
+            dampened_patterns_ctx: list[str] = []
+            suppressed_patterns_ctx: list[str] = []
+
+            if self._review_rules_repo is not None:
+                merged_rules = (
+                    await self._review_rules_repo.list_repo_rules_with_overrides(
+                        org_id, repo.id
+                    )
+                )
+                target_paths = (
+                    [options["target_file"]]
+                    if isinstance(options.get("target_file"), str)
+                    else []
+                )
+                selected_rules = ReviewContextService.select_matching_rules(
+                    merged_rules, target_paths
+                )
+                custom_rules_ctx = [
+                    {
+                        "id": str(r.id),
+                        "title": r.title,
+                        "instruction": r.instruction,
+                        "severity": r.severity,
+                        "category": r.category,
+                        "path_globs": r.path_globs,
+                    }
+                    for r in selected_rules
+                ]
+                active_rule_ids = {r.id for r in selected_rules}
+                if self._review_feedback_repo is not None:
+                    (
+                        pref_pairs,
+                        _,
+                    ) = await self._review_feedback_repo.list_preferences_for_repo(
+                        org_id, repo.id, page=1, page_size=100
+                    )
+                    injectable, dampened_set, suppressed_set = (
+                        ReviewContextService.select_matching_preferences(
+                            pref_pairs, active_rule_ids, target_paths
+                        )
+                    )
+                    team_prefs_ctx = [
+                        {
+                            "pattern_key": p.pattern_key,
+                            "status": p.status,
+                            "instruction": p.instruction,
+                        }
+                        for p in injectable
+                    ]
+                    dampened_patterns_ctx = sorted(dampened_set)
+                    suppressed_patterns_ctx = sorted(suppressed_set)
+                if self._review_examples_repo is not None:
+                    examples = await self._review_examples_repo.list_by_repo(
+                        org_id, repo.id
+                    )
+                    ranked = ReviewContextService.rank_examples(
+                        examples, target_paths, limit=5
+                    )
+                    example_prs_ctx = [
+                        {
+                            "pr_number": ex.pr_number,
+                            "pr_title": ex.pr_title,
+                            "classification": ex.classification,
+                            "guidance_note": ex.guidance_note,
+                            "cached_diff_summary": ex.cached_diff_summary,
+                        }
+                        for ex in ranked
+                    ]
+
             task_context = {
                 "task_id": str(task.id),
                 "title": task.title,
@@ -798,6 +905,11 @@ class RunAutonomousLoopUseCase:
                 "target_file": options.get("target_file", "src/solution.py"),
                 "force_review_critical": options.get("force_review_critical", False),
                 "force_push": options.get("force_push", False),
+                "custom_rules": custom_rules_ctx,
+                "team_preferences": team_prefs_ctx,
+                "example_prs": example_prs_ctx,
+                "dampened_patterns": dampened_patterns_ctx,
+                "suppressed_patterns": suppressed_patterns_ctx,
             }
             for opt_key in (
                 "risky_command",

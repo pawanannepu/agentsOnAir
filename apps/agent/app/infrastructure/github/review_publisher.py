@@ -1,9 +1,11 @@
-"""GitHub Review Publisher with DiffHunkParser and 422 fallback (AC-5)."""
+"""GitHub Review Publisher with DiffHunkParser, 422 fallback, and comment backfill."""
 
 import logging
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, field
 
 from app.application.ports.github_gateway import GitHubGateway
+from app.application.ports.pr_review_repository import PRReviewRepository
 from app.application.services.diff_hunk_parser import DiffHunkParser
 
 logger = logging.getLogger(__name__)
@@ -17,6 +19,7 @@ class PublishReviewResult:
     inline_comments_count: int
     fallback_applied: bool
     summary_markdown: str
+    comment_id_mappings: list[tuple[uuid.UUID, int]] = field(default_factory=list)
 
 
 class GitHubReviewPublisher:
@@ -61,11 +64,13 @@ class GitHubReviewPublisher:
         findings: list[dict],
         diff_text: str,
         token: str,
+        pr_review_repo: PRReviewRepository | None = None,
     ) -> PublishReviewResult:
         """Publish unified review with inline comments and automatic fallback."""
         file_diffs = DiffHunkParser.parse(diff_text)
 
         inline_comments: list[dict] = []
+        inline_finding_ids: list[uuid.UUID | None] = []
         out_of_diff_findings: list[dict] = []
 
         # Categorize findings: in diff hunks vs out of diff
@@ -83,6 +88,13 @@ class GitHubReviewPublisher:
                         "body": self.format_suggestion(f),
                     }
                 )
+                fid = f.get("id")
+                if isinstance(fid, str):
+                    try:
+                        fid = uuid.UUID(fid)
+                    except ValueError:
+                        fid = None
+                inline_finding_ids.append(fid if isinstance(fid, uuid.UUID) else None)
             else:
                 out_of_diff_findings.append(f)
 
@@ -129,7 +141,6 @@ class GitHubReviewPublisher:
                     "GitHub review rejected with 422 diff drift. Fallback to summary."
                 )
 
-                # Reformat all inline findings into the summary narrative
                 fallback_summary_parts = [
                     final_summary,
                     "\n### Inline Findings (Diff Drift Fallback)\n",
@@ -154,9 +165,54 @@ class GitHubReviewPublisher:
             else:
                 raise
 
+        comment_id_mappings: list[tuple[uuid.UUID, int]] = []
+        if inline_comments and not fallback_applied and github_review_id is not None:
+            try:
+                remote_comments = await self._github_gateway.list_review_comments(
+                    repo_full_name=repo_full_name,
+                    pr_number=pr_number,
+                    github_review_id=int(github_review_id),
+                    token=token,
+                )
+                used_indices: set[int] = set()
+                for idx, local_comment in enumerate(inline_comments):
+                    fid = inline_finding_ids[idx]
+                    if fid is None:
+                        continue
+                    local_key = (
+                        local_comment["path"],
+                        local_comment["line"],
+                        local_comment["body"],
+                    )
+                    for r_idx, rc in enumerate(remote_comments):
+                        if r_idx in used_indices:
+                            continue
+                        r_line = rc.get("line")
+                        if r_line is None:
+                            r_line = rc.get("original_line")
+                        remote_key = (
+                            rc.get("path"),
+                            r_line,
+                            rc.get("body"),
+                        )
+                        if remote_key == local_key and rc.get("id") is not None:
+                            used_indices.add(r_idx)
+                            cid = int(rc["id"])
+                            comment_id_mappings.append((fid, cid))
+                            if pr_review_repo is not None:
+                                await pr_review_repo.update_finding_github_id(fid, cid)
+                            break
+            except Exception as exc:
+                logger.warning(
+                    "Failed to backfill GitHub comment IDs for review %s: %s",
+                    github_review_id,
+                    exc,
+                )
+
         return PublishReviewResult(
             github_review_id=github_review_id,
             inline_comments_count=0 if fallback_applied else len(inline_comments),
             fallback_applied=fallback_applied,
             summary_markdown=final_summary,
+            comment_id_mappings=comment_id_mappings,
         )

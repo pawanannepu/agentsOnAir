@@ -5,8 +5,15 @@ import time
 import uuid
 from collections.abc import Sequence
 
+import httpx
+import jwt
+
 from app.application.ports.github_gateway import GitHubGateway
-from app.domain.exceptions import ProtectedBranchError, ValidationError
+from app.domain.exceptions import (
+    ExternalServiceError,
+    ProtectedBranchError,
+    ValidationError,
+)
 from app.domain.services.policy_evaluator import (
     DEFAULT_PROTECTED_BRANCHES,
     EffectiveGuardrailPolicy,
@@ -21,15 +28,97 @@ class GitHubService(GitHubGateway):
         self,
         app_id: str | None = None,
         private_key: str | None = None,
+        api_base_url: str = "https://api.github.com",
+        http_client: httpx.AsyncClient | None = None,
     ) -> None:
         self._app_id = app_id
         self._private_key = private_key
+        self._api_base_url = api_base_url.rstrip("/")
+        self._http_client = http_client
+
+    def _build_headers(self, token: str, accept: str) -> dict[str, str]:
+        headers = {
+            "Accept": accept,
+            "User-Agent": "agentsOnAir",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        is_dev_stub_token = (
+            self._http_client is None
+            and not (self._app_id and self._private_key)
+            and token.startswith(("ghs_read_", "ghs_write_"))
+        )
+        if token and not is_dev_stub_token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        token: str,
+        *,
+        accept: str = "application/vnd.github+json",
+    ) -> httpx.Response:
+        url = f"{self._api_base_url}{path}"
+        headers = self._build_headers(token, accept)
+        if self._http_client is not None:
+            response = await self._http_client.request(method, url, headers=headers)
+        else:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.request(method, url, headers=headers)
+
+        if response.status_code in (404, 422):
+            raise ValidationError(
+                f"GitHub API returned {response.status_code} for {path}"
+            )
+        if response.status_code >= 400:
+            raise ExternalServiceError(
+                f"GitHub API error {response.status_code} for {path}"
+            )
+        return response
 
     async def get_installation_token(
         self, installation_id: int, write_access: bool = False
     ) -> str:
-        # In production with keys, this would authenticate as GitHub App.
-        # For development and testing, generates an isolated credential token.
+        if (
+            self._app_id
+            and self._private_key
+            and installation_id > 0
+            and "placeholder" not in self._private_key.lower()
+        ):
+            now = int(time.time())
+            app_jwt = jwt.encode(
+                {"iat": now - 60, "exp": now + 540, "iss": self._app_id},
+                self._private_key.replace("\\n", "\n"),
+                algorithm="RS256",
+            )
+            perm = "write" if write_access else "read"
+            url = (
+                f"{self._api_base_url}/app/installations/"
+                f"{installation_id}/access_tokens"
+            )
+            headers = {
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {app_jwt}",
+                "User-Agent": "agentsOnAir",
+                "X-GitHub-Api-Version": "2022-11-28",
+            }
+            payload = {"permissions": {"contents": perm, "pull_requests": perm}}
+            if self._http_client is not None:
+                resp = await self._http_client.post(url, headers=headers, json=payload)
+            else:
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.post(url, headers=headers, json=payload)
+            if resp.status_code < 400:
+                token = str(resp.json().get("token") or "")
+                if token:
+                    return token
+            raise ExternalServiceError(
+                f"GitHub App token exchange failed ({resp.status_code})"
+            )
+
+        # For development and testing without GitHub App credentials, return a
+        # role-tagged placeholder token that _build_headers strips on public calls.
         token_type = "write" if write_access else "read"
         return f"ghs_{token_type}_{installation_id}_{uuid.uuid4().hex[:12]}"
 
@@ -97,13 +186,13 @@ class GitHubService(GitHubGateway):
         pr_number: int,
         token: str,
     ) -> dict:
-        return {
-            "number": pr_number,
-            "title": f"Pull Request #{pr_number}",
-            "user": {"login": "contributor"},
-            "head": {"sha": "headsha" + "0" * 33},
-            "base": {"sha": "basesha" + "0" * 33},
-        }
+        response = await self._request(
+            "GET",
+            f"/repos/{repo_full_name}/pulls/{pr_number}",
+            token,
+            accept="application/vnd.github+json",
+        )
+        return dict(response.json())
 
     async def get_pull_request_diff(
         self,
@@ -111,16 +200,13 @@ class GitHubService(GitHubGateway):
         pr_number: int,
         token: str,
     ) -> str:
-        return (
-            "diff --git a/src/main.py b/src/main.py\n"
-            "index 0000000..1111111 100644\n"
-            "--- a/src/main.py\n"
-            "+++ b/src/main.py\n"
-            "@@ -1,5 +1,5 @@\n"
-            "-def old():\n"
-            "+def new():\n"
-            "     pass\n"
+        response = await self._request(
+            "GET",
+            f"/repos/{repo_full_name}/pulls/{pr_number}",
+            token,
+            accept="application/vnd.github.v3.diff",
         )
+        return response.text
 
     async def submit_review(
         self,
@@ -140,3 +226,19 @@ class GitHubService(GitHubGateway):
             "commit_id": commit_sha,
             "comments": comments,
         }
+
+    async def list_review_comments(
+        self,
+        repo_full_name: str,
+        pr_number: int,
+        github_review_id: int,
+        token: str,
+    ) -> list[dict]:
+        response = await self._request(
+            "GET",
+            f"/repos/{repo_full_name}/pulls/{pr_number}/reviews/{github_review_id}/comments",
+            token,
+            accept="application/vnd.github+json",
+        )
+        data = response.json()
+        return list(data) if isinstance(data, list) else []

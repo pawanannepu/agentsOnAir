@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
+    analytics,
     health,
     organizations,
     repositories,
@@ -20,3 +21,4 @@ api_router.include_router(
 )
 api_router.include_router(tasks.router, prefix="/tasks", tags=["tasks"])
 api_router.include_router(reviews.router, tags=["reviews"])
+api_router.include_router(analytics.router, prefix="/analytics", tags=["analytics"])

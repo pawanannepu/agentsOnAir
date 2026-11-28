@@ -13,6 +13,8 @@ import {
   ShieldCheck,
   Bot,
   Building2,
+  GitPullRequest,
+  BarChart3,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -58,6 +60,16 @@ export function Sidebar({
       href: "/tasks",
       icon: Terminal,
       badge: activeRunCount > 0 ? activeRunCount : undefined,
+    },
+    {
+      label: "Reviews",
+      href: "/reviews",
+      icon: GitPullRequest,
+    },
+    {
+      label: "Analytics",
+      href: "/analytics",
+      icon: BarChart3,
     },
     {
       label: "Repositories",

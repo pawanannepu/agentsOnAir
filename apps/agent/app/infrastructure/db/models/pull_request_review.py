@@ -113,6 +113,18 @@ class PullRequestReviewModel(Base, TimestampMixin):
             text("created_at DESC"),
         ),
         Index(
+            "ix_pr_reviews_org_status_created",
+            "org_id",
+            "status",
+            "created_at",
+        ),
+        Index(
+            "ix_pr_reviews_repo_status_created",
+            "repo_id",
+            "status",
+            "created_at",
+        ),
+        Index(
             "uq_pr_reviews_active_pr",
             "repo_id",
             "pr_number",

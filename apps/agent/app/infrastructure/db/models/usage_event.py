@@ -105,6 +105,11 @@ class UsageEventModel(Base):
             "task_run_id",
             text("created_at ASC"),
         ),
+        Index(
+            "ix_usage_events_pr_review_created",
+            "pr_review_id",
+            "created_at",
+        ),
     )
 
     organization: Mapped["OrganizationModel"] = relationship("OrganizationModel")

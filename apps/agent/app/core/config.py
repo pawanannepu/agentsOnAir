@@ -92,6 +92,7 @@ class Settings(BaseSettings):
 
     # Redis telemetry and pubsub
     REDIS_URL: str = "redis://localhost:6379/0"
+    ANALYTICS_CACHE_TTL_SECONDS: int = 0
 
     @property
     def approval_timeout_seconds(self) -> int:

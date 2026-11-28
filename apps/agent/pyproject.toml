@@ -18,6 +18,7 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.36",
     "sse-starlette>=3.7.1",
     "svix>=2.11.1",
+    "tiktoken>=0.14.0",
     "uuid-utils>=0.9.0",
     "uvicorn[standard]>=0.32.0",
 ]

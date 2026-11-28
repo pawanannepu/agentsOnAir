@@ -53,6 +53,8 @@ def _finding_to_entity(model: PRReviewFindingModel) -> PRReviewFinding:
         suggested_patch=model.suggested_patch,
         github_comment_id=model.github_comment_id,
         status=model.status,
+        rule_id=model.rule_id,
+        feedback_state=model.feedback_state,
         created_at=model.created_at,
     )
 
@@ -208,6 +210,8 @@ class SqlAlchemyPRReviewRepository(PRReviewRepository):
                 suggested_patch=f.get("suggested_patch"),
                 github_comment_id=f.get("github_comment_id"),
                 status=f.get("status", "open"),
+                rule_id=f.get("rule_id"),
+                feedback_state=f.get("feedback_state", "none"),
             )
             models.append(model)
             self._session.add(model)

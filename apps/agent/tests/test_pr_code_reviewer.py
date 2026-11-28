@@ -487,6 +487,15 @@ class MockGitHubService(GitHubGateway):
         self.submitted_reviews.append(review)
         return review
 
+    async def list_review_comments(
+        self,
+        repo_full_name: str,
+        pr_number: int,
+        github_review_id: int,
+        token: str,
+    ) -> list[dict]:
+        return []
+
 
 def sign_payload(payload_bytes: bytes, secret: str) -> str:
     sig = hmac.new(secret.encode("utf-8"), payload_bytes, hashlib.sha256).hexdigest()

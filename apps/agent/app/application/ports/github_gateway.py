@@ -69,3 +69,13 @@ class GitHubGateway(Protocol):
     ) -> dict:
         """Submit unified review with optional inline comments."""
         ...
+
+    async def list_review_comments(
+        self,
+        repo_full_name: str,
+        pr_number: int,
+        github_review_id: int,
+        token: str,
+    ) -> list[dict]:
+        """Fetch inline comments created by a submitted GitHub pull request review."""
+        ...

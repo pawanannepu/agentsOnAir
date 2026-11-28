@@ -22,4 +22,6 @@ class PRReviewFinding:
     suggested_patch: str | None
     github_comment_id: int | None
     status: str  # open, resolved, outdated, dismissed
+    rule_id: uuid.UUID | None = None
+    feedback_state: str = "none"  # none, accepted, dismissed
     created_at: datetime | None = None

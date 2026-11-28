@@ -1,15 +1,31 @@
 """GitHub App webhook ingestion use case."""
 
 import json
+import re
 import uuid
 from dataclasses import dataclass
 
 from app.application.ports.github_gateway import GitHubGateway
 from app.application.ports.pr_review_repository import PRReviewRepository
 from app.application.ports.repository_repository import RepositoryRepository
+from app.application.ports.review_feedback_repository import ReviewFeedbackRepository
 from app.application.ports.task_repository import TaskRepository
+from app.application.use_cases.review_feedback import ReviewFeedbackUseCase
 from app.domain.exceptions import WebhookSignatureError
+from app.infrastructure.db.repositories.review_feedback_repository import (
+    SqlAlchemyReviewFeedbackRepository,
+)
 from app.infrastructure.github.webhook import verify_github_signature
+
+ALLOWED_FEEDBACK_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+_DISMISS_PREFIX_RE = re.compile(
+    r"^(?:dismiss|false\s+positive|ignore)\b(.*)$",
+    re.IGNORECASE | re.DOTALL,
+)
+_ACCEPT_PREFIX_RE = re.compile(
+    r"^(?:good\s+catch|accept)\b(.*)$",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 @dataclass(slots=True)
@@ -31,11 +47,21 @@ class IngestGitHubWebhookUseCase:
         task_repo: TaskRepository,
         pr_review_repo: PRReviewRepository | None = None,
         github_gateway: GitHubGateway | None = None,
+        review_feedback_repo: ReviewFeedbackRepository | None = None,
     ) -> None:
         self._repository_repo = repository_repo
         self._task_repo = task_repo
         self._pr_review_repo = pr_review_repo
         self._github_gateway = github_gateway
+        session = getattr(repository_repo, "_session", None)
+        self._review_feedback_repo: ReviewFeedbackRepository | None = (
+            review_feedback_repo
+            or (
+                SqlAlchemyReviewFeedbackRepository(session)
+                if session is not None
+                else None
+            )
+        )
 
     async def execute(
         self,
@@ -65,6 +91,15 @@ class IngestGitHubWebhookUseCase:
             )
 
         action = payload.get("action", "")
+
+        # 2b. Handle review thread resolve/unresolve & reply comment feedback (AC-3)
+        if event_type in ("pull_request_review_thread", "pull_request_review_comment"):
+            return await self._handle_feedback_webhook(
+                event_type=event_type,
+                action=action,
+                delivery_id=delivery_id,
+                payload=payload,
+            )
 
         # 3. Handle Pull Request Events and Review Comments
         if event_type == "pull_request":
@@ -363,4 +398,224 @@ class IngestGitHubWebhookUseCase:
         return WebhookIngestResult(
             status="queued",
             task_id=str(task.id),
+        )
+
+    @staticmethod
+    def _is_bot_actor(actor: dict) -> bool:
+        login = str(actor.get("login") or "")
+        actor_type = str(actor.get("type") or "")
+        return (
+            actor_type == "Bot"
+            or login == "agentsonair[bot]"
+            or login.endswith("[bot]")
+        )
+
+    @staticmethod
+    def _clean_trailing_reason(raw_tail: str) -> str | None:
+        cleaned = raw_tail.lstrip(" \t\r\n:,-").strip()
+        return cleaned if cleaned else None
+
+    async def _handle_feedback_webhook(
+        self,
+        *,
+        event_type: str,
+        action: str,
+        delivery_id: str | None,
+        payload: dict,
+    ) -> WebhookIngestResult:
+        if not delivery_id or not delivery_id.strip():
+            return WebhookIngestResult(
+                status="ignored",
+                reason="missing_delivery_id",
+            )
+        if self._review_feedback_repo is None:
+            return WebhookIngestResult(
+                status="ignored",
+                reason="feedback_repository_unavailable",
+            )
+
+        sender = payload.get("sender") or {}
+        if self._is_bot_actor(sender):
+            return WebhookIngestResult(
+                status="ignored",
+                reason="bot_sender_excluded",
+            )
+        sender_login = str(sender.get("login") or "github_user")
+
+        github_repo_id = (payload.get("repository") or {}).get("id")
+        if not github_repo_id:
+            return WebhookIngestResult(
+                status="ignored",
+                reason="missing_repository_id",
+            )
+        repo = await self._repository_repo.find_by_github_repo_id(int(github_repo_id))
+        if not repo:
+            return WebhookIngestResult(
+                status="ignored",
+                reason="repository_not_tracked",
+            )
+
+        feedback_uc = ReviewFeedbackUseCase(self._review_feedback_repo)
+
+        if event_type == "pull_request_review_thread":
+            if action not in ("resolved", "unresolved"):
+                return WebhookIngestResult(
+                    status="ignored",
+                    reason=f"unhandled_thread_action_{action}",
+                )
+
+            thread = payload.get("thread") or {}
+            comments = thread.get("comments") or []
+            assoc = (
+                payload.get("author_association")
+                or sender.get("author_association")
+                or next(
+                    (
+                        c.get("author_association")
+                        for c in comments
+                        if isinstance(c, dict)
+                        and (c.get("user") or {}).get("login") == sender_login
+                        and c.get("author_association")
+                    ),
+                    None,
+                )
+                or (
+                    comments[0].get("author_association")
+                    if comments and isinstance(comments[0], dict)
+                    else None
+                )
+            )
+            if str(assoc or "").upper() not in ALLOWED_FEEDBACK_ASSOCIATIONS:
+                return WebhookIngestResult(
+                    status="ignored",
+                    reason="unauthorized_author_association",
+                )
+
+            matched_pair = None
+            for comment in comments:
+                if not isinstance(comment, dict) or comment.get("id") is None:
+                    continue
+                matched_pair = (
+                    await self._review_feedback_repo.find_finding_by_github_comment_id(
+                        repo.id, int(comment["id"])
+                    )
+                )
+                if matched_pair is not None:
+                    break
+
+            if matched_pair is None:
+                return WebhookIngestResult(
+                    status="ignored",
+                    reason="finding_not_found",
+                )
+
+            finding, review = matched_pair
+            if action == "unresolved":
+                await feedback_uc.reset_finding_unresolved(repo.org_id, finding.id)
+                return WebhookIngestResult(
+                    status="processed",
+                    review_id=str(review.id),
+                    reason="finding_feedback_unresolved",
+                )
+
+            result = await feedback_uc.submit_feedback(
+                org_id=repo.org_id,
+                finding_id=finding.id,
+                feedback_type="accepted",
+                source="github_thread_resolved",
+                actor_id=sender_login,
+                github_event_id=delivery_id.strip(),
+            )
+            return WebhookIngestResult(
+                status="ignored"
+                if result.deduplicated and not result.applied
+                else "processed",
+                review_id=str(review.id),
+                reason="duplicate_delivery"
+                if result.deduplicated
+                else "thread_resolved_accepted",
+            )
+
+        # pull_request_review_comment
+        if action != "created":
+            return WebhookIngestResult(
+                status="ignored",
+                reason=f"unhandled_review_comment_action_{action}",
+            )
+
+        comment = payload.get("comment") or {}
+        comment_user = comment.get("user") or {}
+        if comment_user and self._is_bot_actor(comment_user):
+            return WebhookIngestResult(
+                status="ignored",
+                reason="bot_sender_excluded",
+            )
+
+        assoc = (
+            comment.get("author_association")
+            or sender.get("author_association")
+            or payload.get("author_association")
+        )
+        if str(assoc or "").upper() not in ALLOWED_FEEDBACK_ASSOCIATIONS:
+            return WebhookIngestResult(
+                status="ignored",
+                reason="unauthorized_author_association",
+            )
+
+        in_reply_to_id = comment.get("in_reply_to_id")
+        if not in_reply_to_id:
+            return WebhookIngestResult(
+                status="ignored",
+                reason="not_a_reply_comment",
+            )
+
+        body = str(comment.get("body") or "").strip()
+        feedback_type: str | None = None
+        reason_text: str | None = None
+        dismiss_match = _DISMISS_PREFIX_RE.match(body)
+        if dismiss_match:
+            feedback_type = "dismissed"
+            reason_text = self._clean_trailing_reason(dismiss_match.group(1))
+        else:
+            accept_match = _ACCEPT_PREFIX_RE.match(body)
+            if accept_match:
+                feedback_type = "accepted"
+                reason_text = self._clean_trailing_reason(accept_match.group(1))
+
+        if feedback_type is None:
+            return WebhookIngestResult(
+                status="ignored",
+                reason="unrecognized_feedback_prefix",
+            )
+
+        matched_pair = (
+            await self._review_feedback_repo.find_finding_by_github_comment_id(
+                repo.id, int(in_reply_to_id)
+            )
+        )
+        if matched_pair is None:
+            return WebhookIngestResult(
+                status="ignored",
+                reason="finding_not_found",
+            )
+
+        finding, review = matched_pair
+        result = await feedback_uc.submit_feedback(
+            org_id=repo.org_id,
+            finding_id=finding.id,
+            feedback_type=feedback_type,
+            source="github_comment_reply",
+            actor_id=sender_login,
+            reason=reason_text,
+            remember_preference=False,
+            github_event_id=delivery_id.strip(),
+        )
+        return WebhookIngestResult(
+            status="ignored"
+            if result.deduplicated and not result.applied
+            else "processed",
+            review_id=str(review.id),
+            reason="duplicate_delivery"
+            if result.deduplicated
+            else f"comment_reply_{feedback_type}",
         )

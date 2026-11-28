@@ -62,6 +62,17 @@ export const repositories = pgTable(
       .default("main"),
     isPrivate: boolean("is_private").notNull().default(true),
     config: jsonb("config").notNull().default({}),
+    reviewSettings: jsonb("review_settings")
+      .notNull()
+      .default({
+        enabled: true,
+        auto_review: true,
+        allow_approval: false,
+        ignore_all_bots: false,
+        min_severity: "info",
+        max_comments: 25,
+        ignored_paths: ["*.lock", "dist/**", "node_modules/**"],
+      }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -200,6 +211,11 @@ export const taskRuns = pgTable(
       table.orgId,
       table.status,
       table.createdAt
+    ),
+    index("ix_task_runs_org_status_completed").on(
+      table.orgId,
+      table.status,
+      table.completedAt
     ),
     index("ix_task_runs_task_status").on(table.taskId, table.status),
   ]
@@ -422,6 +438,10 @@ export const usageEvents = pgTable(
       table.taskRunId,
       table.createdAt
     ),
+    index("ix_usage_events_pr_review_created").on(
+      table.prReviewId,
+      table.createdAt
+    ),
   ]
 );
 
@@ -445,6 +465,287 @@ export const orgMonthlyUsage = pgTable(
     uniqueIndex("uq_org_monthly_usage_org_month").on(
       table.orgId,
       table.billingMonth
+    ),
+  ]
+);
+
+export const pullRequestReviews = pgTable(
+  "pull_request_reviews",
+  {
+    id: uuid("id").primaryKey(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    repoId: uuid("repo_id")
+      .notNull()
+      .references(() => repositories.id, { onDelete: "cascade" }),
+    taskId: uuid("task_id").references(() => tasks.id, {
+      onDelete: "set null",
+    }),
+    prNumber: integer("pr_number").notNull(),
+    prTitle: varchar("pr_title", { length: 512 }).notNull(),
+    prAuthor: varchar("pr_author", { length: 100 }).notNull(),
+    headCommitSha: varchar("head_commit_sha", { length: 40 }).notNull(),
+    baseCommitSha: varchar("base_commit_sha", { length: 40 }).notNull(),
+    status: varchar("status", { length: 50 }).notNull().default("pending"),
+    verdict: varchar("verdict", { length: 50 }),
+    summary: text("summary"),
+    githubReviewId: bigint("github_review_id", { mode: "number" }),
+    contextTokenCount: integer("context_token_count").notNull().default(0),
+    modelName: varchar("model_name", { length: 100 }).notNull(),
+    executionDurationMs: integer("execution_duration_ms"),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("ix_pr_reviews_repo_pr_created").on(
+      table.repoId,
+      table.prNumber,
+      table.createdAt
+    ),
+    index("ix_pr_reviews_org_created").on(table.orgId, table.createdAt),
+    index("ix_pr_reviews_org_status_created").on(
+      table.orgId,
+      table.status,
+      table.createdAt
+    ),
+    index("ix_pr_reviews_repo_status_created").on(
+      table.repoId,
+      table.status,
+      table.createdAt
+    ),
+    uniqueIndex("uq_pr_reviews_active_pr")
+      .on(table.repoId, table.prNumber)
+      .where(
+        sql`${table.status} IN ('pending', 'analyzing', 'reviewing', 'posting')`
+      ),
+  ]
+);
+
+export const reviewRules = pgTable(
+  "review_rules",
+  {
+    id: uuid("id").primaryKey(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    repoId: uuid("repo_id").references(() => repositories.id, {
+      onDelete: "cascade",
+    }),
+    title: varchar("title", { length: 200 }).notNull(),
+    instruction: text("instruction").notNull(),
+    severity: varchar("severity", { length: 20 }).notNull(),
+    category: varchar("category", { length: 50 }).notNull(),
+    pathGlobs: jsonb("path_globs")
+      .$type<string[]>()
+      .notNull()
+      .default(["**/*"]),
+    isEnabled: boolean("is_enabled").notNull().default(true),
+    createdBy: varchar("created_by", { length: 255 }).notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("ix_review_rules_org_repo_enabled_active")
+      .on(table.orgId, table.repoId, table.isEnabled)
+      .where(sql`${table.deletedAt} IS NULL`),
+  ]
+);
+
+export const reviewRuleOverrides = pgTable(
+  "review_rule_overrides",
+  {
+    id: uuid("id").primaryKey(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    repoId: uuid("repo_id")
+      .notNull()
+      .references(() => repositories.id, { onDelete: "cascade" }),
+    ruleId: uuid("rule_id")
+      .notNull()
+      .references(() => reviewRules.id, { onDelete: "cascade" }),
+    isEnabled: boolean("is_enabled"),
+    severityOverride: varchar("severity_override", { length: 20 }),
+    updatedBy: varchar("updated_by", { length: 255 }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("uq_review_rule_overrides_repo_rule").on(
+      table.repoId,
+      table.ruleId
+    ),
+    index("ix_review_rule_overrides_org_id").on(table.orgId),
+  ]
+);
+
+export const reviewExamples = pgTable(
+  "review_examples",
+  {
+    id: uuid("id").primaryKey(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    repoId: uuid("repo_id")
+      .notNull()
+      .references(() => repositories.id, { onDelete: "cascade" }),
+    prNumber: integer("pr_number").notNull(),
+    prUrl: varchar("pr_url", { length: 512 }).notNull(),
+    prTitle: varchar("pr_title", { length: 512 }).notNull(),
+    classification: varchar("classification", { length: 20 }).notNull(),
+    guidanceNote: text("guidance_note").notNull(),
+    modifiedFiles: jsonb("modified_files")
+      .$type<string[]>()
+      .notNull()
+      .default([]),
+    cachedDiffSummary: text("cached_diff_summary"),
+    cachedTokenCount: integer("cached_token_count").notNull().default(0),
+    cachedAt: timestamp("cached_at", { withTimezone: true }),
+    createdBy: varchar("created_by", { length: 255 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("uq_review_examples_repo_pr").on(table.repoId, table.prNumber),
+    index("ix_review_examples_org_repo").on(table.orgId, table.repoId),
+  ]
+);
+
+export const prReviewFindings = pgTable(
+  "pr_review_findings",
+  {
+    id: uuid("id").primaryKey(),
+    reviewId: uuid("review_id")
+      .notNull()
+      .references(() => pullRequestReviews.id, { onDelete: "cascade" }),
+    filePath: varchar("file_path", { length: 1024 }).notNull(),
+    startLine: integer("start_line"),
+    lineNumber: integer("line_number").notNull(),
+    side: varchar("side", { length: 10 }).notNull().default("RIGHT"),
+    severity: varchar("severity", { length: 20 }).notNull(),
+    category: varchar("category", { length: 50 }).notNull(),
+    title: varchar("title", { length: 255 }).notNull(),
+    message: text("message").notNull(),
+    suggestedPatch: text("suggested_patch"),
+    githubCommentId: bigint("github_comment_id", { mode: "number" }),
+    status: varchar("status", { length: 30 }).notNull().default("open"),
+    ruleId: uuid("rule_id").references(() => reviewRules.id, {
+      onDelete: "set null",
+    }),
+    feedbackState: varchar("feedback_state", { length: 20 })
+      .notNull()
+      .default("none"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("ix_pr_findings_review_severity").on(table.reviewId, table.severity),
+    index("ix_pr_findings_review_file").on(table.reviewId, table.filePath),
+    index("ix_pr_findings_rule_feedback").on(table.ruleId, table.feedbackState),
+    index("ix_pr_findings_review_feedback").on(
+      table.reviewId,
+      table.feedbackState
+    ),
+    index("ix_pr_findings_github_comment_id")
+      .on(table.githubCommentId)
+      .where(sql`${table.githubCommentId} IS NOT NULL`),
+  ]
+);
+
+export const reviewFindingFeedback = pgTable(
+  "review_finding_feedback",
+  {
+    id: uuid("id").primaryKey(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    repoId: uuid("repo_id")
+      .notNull()
+      .references(() => repositories.id, { onDelete: "cascade" }),
+    findingId: uuid("finding_id")
+      .notNull()
+      .references(() => prReviewFindings.id, { onDelete: "cascade" }),
+    feedbackType: varchar("feedback_type", { length: 20 }).notNull(),
+    source: varchar("source", { length: 32 }).notNull(),
+    reason: text("reason"),
+    rememberPreference: boolean("remember_preference").notNull().default(false),
+    actorId: varchar("actor_id", { length: 255 }).notNull(),
+    githubEventId: varchar("github_event_id", { length: 128 }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("uq_review_finding_feedback_gh_event")
+      .on(table.githubEventId)
+      .where(sql`${table.githubEventId} IS NOT NULL`),
+    index("ix_review_finding_feedback_finding_created").on(
+      table.findingId,
+      table.createdAt
+    ),
+    index("ix_review_finding_feedback_org_repo").on(table.orgId, table.repoId),
+  ]
+);
+
+export const reviewLearnedPreferences = pgTable(
+  "review_learned_preferences",
+  {
+    id: uuid("id").primaryKey(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    repoId: uuid("repo_id")
+      .notNull()
+      .references(() => repositories.id, { onDelete: "cascade" }),
+    ruleId: uuid("rule_id").references(() => reviewRules.id, {
+      onDelete: "set null",
+    }),
+    sourceFeedbackId: uuid("source_feedback_id").references(
+      () => reviewFindingFeedback.id,
+      { onDelete: "set null" }
+    ),
+    patternKey: varchar("pattern_key", { length: 255 }).notNull(),
+    instruction: text("instruction").notNull(),
+    dismissCount: integer("dismiss_count").notNull().default(0),
+    acceptCount: integer("accept_count").notNull().default(0),
+    consecutiveDismissals: integer("consecutive_dismissals")
+      .notNull()
+      .default(0),
+    status: varchar("status", { length: 20 }).notNull().default("active"),
+    lastFeedbackAt: timestamp("last_feedback_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("uq_review_learned_prefs_repo_pattern").on(
+      table.repoId,
+      table.patternKey
+    ),
+    index("ix_review_learned_prefs_org_repo_status").on(
+      table.orgId,
+      table.repoId,
+      table.status
     ),
   ]
 );

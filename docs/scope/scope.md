@@ -20,7 +20,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 6 | Full repository context code reviewer | Slice 2 | in-progress |
 | 7 | Live task streaming & interactive collaboration | Slice 3 | in-progress |
 | 8 | Guardrails, branch protection & budget limits | Slice 4 | in-progress |
-| 9 | Custom review rules & feedback learning | Slice 5 | planned |
+| 9 | Custom review rules & feedback learning | Slice 5 | in-progress |
 
 ## Foundations
 
@@ -163,10 +163,21 @@ spec [0008](../specs/0008-guardrails-branch-protection-and-budget-limits/index.m
 
 ## Slice 5: Custom review rules & feedback learning
 
-### 9. Custom review rules & feedback learning · needs a decision
+### 9. Custom review rules & feedback learning
 Enable teams to configure written review guidelines and example pull requests, learn from accepted or dismissed feedback, and display team quality and turnaround metrics.
 **Done when:** teams can configure repository specific guidelines, review suggestions adapt to dismiss history, and the console reports turnaround and cost metrics.
-- [ ] Design it (spec): `/architect custom review rules & feedback learning`
+spec [0009](../specs/0009-custom-review-rules-and-feedback-learning/index.md) · code in `apps/agent/`, `apps/web/`
+- [x] Design it (spec): `/architect custom review rules & feedback learning`
+- [x] Build it: `/develop custom review rules & feedback learning`
+  - [x] Database migrations, Spec 0005 schema backfill, and ReviewContextService core (AC-1, AC-2, AC-4, AC-7)
+  - [x] Tier 1 bounded prompt injection across PR reviews and Forge reviewer loop (AC-4, AC-5)
+  - [x] GitHub comment ID backfill, console feedback endpoint, and gated webhook ingestion (AC-3, AC-4)
+  - [x] Rules, examples, preferences, reviews, and SQL analytics REST endpoints (AC-1, AC-2, AC-4, AC-6, AC-7)
+  - [x] Console UI for /analytics, /reviews, /settings guidelines, and /repositories drawer tabs (AC-7)
+- [x] Verify it: `/check verify custom review rules & feedback learning`
+- [x] Test it: `/test custom review rules & feedback learning`
+- [x] Review it (fresh model): `/check review custom review rules & feedback learning`
+- [x] Document it: `/document custom review rules & feedback learning`
 
 ## Deferred
 Out of scope for the current build pass, kept so the plan stays honest.

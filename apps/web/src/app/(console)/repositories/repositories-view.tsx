@@ -38,6 +38,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  RepoExamplePRsTab,
+  RepoLearnedPreferencesTab,
+  RepoRulesAndOverridesTab,
+} from "@/components/repositories/repo-review-tabs";
 import { useBreadcrumbs } from "@/components/layout/breadcrumb-context";
 import { toast } from "@/components/ui/sonner";
 import {
@@ -506,212 +512,273 @@ export function RepositoriesView({
         </div>
       )}
 
-      {/* Repository Guardrail Overrides Drawer / Dialog */}
+      {/* Repository Configuration Drawer / Dialog */}
       <Dialog open={drawerOpen} onOpenChange={setDrawerOpen}>
-        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               Guardrail Overrides · {selectedRepo?.fullName}
             </DialogTitle>
             <DialogDescription className="text-xs">
-              Leave any field empty to inherit the organization default.{" "}
+              Configure guardrails, custom review rules, curated example PRs,
+              and learned preferences.{" "}
               {!isAdmin &&
-                "Read only view: org:admin role is required to modify overrides."}
+                "Read only view: org:admin role is required to modify repository settings."}
             </DialogDescription>
           </DialogHeader>
 
-          {isDrawerLoading ? (
-            <div className="py-8 flex items-center justify-center text-xs text-muted-foreground gap-2">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span>Loading effective guardrails...</span>
-            </div>
-          ) : (
-            <form onSubmit={handleSaveOverrides} className="space-y-4 text-xs">
-              <div className="space-y-1.5">
-                <label
-                  htmlFor="repo-protected-branches"
-                  className="font-medium text-foreground"
-                >
-                  Protected Branches Override
-                </label>
-                <Input
-                  id="repo-protected-branches"
-                  value={overrideBranches}
-                  onChange={(e) => setOverrideBranches(e.target.value)}
-                  disabled={!isAdmin}
-                  placeholder={`Inherit (${orgDefaults?.protected_branches.join(", ") ?? "main, master, release/*"})`}
-                  className="font-mono text-xs"
-                />
-              </div>
+          {selectedRepo && (
+            <Tabs defaultValue="guardrails" className="w-full">
+              <TabsList className="grid w-full grid-cols-4 h-auto">
+                <TabsTrigger value="guardrails" className="text-xs py-1.5">
+                  Guardrails
+                </TabsTrigger>
+                <TabsTrigger value="rules" className="text-xs py-1.5">
+                  Rules & Overrides
+                </TabsTrigger>
+                <TabsTrigger value="examples" className="text-xs py-1.5">
+                  Example PRs
+                </TabsTrigger>
+                <TabsTrigger value="preferences" className="text-xs py-1.5">
+                  Learned Preferences
+                </TabsTrigger>
+              </TabsList>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <label
-                    htmlFor="repo-max-task-cost"
-                    className="font-medium text-foreground"
-                  >
-                    Max Task Cost (Cents)
-                  </label>
-                  <Input
-                    id="repo-max-task-cost"
-                    type="number"
-                    min="1"
-                    value={overrideMaxTaskCost}
-                    onChange={(e) => setOverrideMaxTaskCost(e.target.value)}
-                    disabled={!isAdmin}
-                    placeholder={`Inherit (${orgDefaults?.max_task_cost_cents ?? 500})`}
-                    className="font-mono text-xs"
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <label
-                    htmlFor="repo-timeout-minutes"
-                    className="font-medium text-foreground"
-                  >
-                    Timeout (Minutes)
-                  </label>
-                  <Input
-                    id="repo-timeout-minutes"
-                    type="number"
-                    min="1"
-                    max="60"
-                    value={overrideTimeout}
-                    onChange={(e) => setOverrideTimeout(e.target.value)}
-                    disabled={!isAdmin}
-                    placeholder={`Inherit (${orgDefaults?.timeout_minutes ?? 10})`}
-                    className="font-mono text-xs"
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <label
-                    htmlFor="repo-max-cycles"
-                    className="font-medium text-foreground"
-                  >
-                    Max Review Cycles
-                  </label>
-                  <Input
-                    id="repo-max-cycles"
-                    type="number"
-                    min="1"
-                    max="10"
-                    value={overrideMaxCycles}
-                    onChange={(e) => setOverrideMaxCycles(e.target.value)}
-                    disabled={!isAdmin}
-                    placeholder={`Inherit (${orgDefaults?.max_cycles ?? 3})`}
-                    className="font-mono text-xs"
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <label
-                    htmlFor="repo-large-diff"
-                    className="font-medium text-foreground"
-                  >
-                    Large Diff Threshold (Lines)
-                  </label>
-                  <Input
-                    id="repo-large-diff"
-                    type="number"
-                    min="1"
-                    value={overrideLargeDiff}
-                    onChange={(e) => setOverrideLargeDiff(e.target.value)}
-                    disabled={!isAdmin}
-                    placeholder={`Inherit (${orgDefaults?.large_diff_lines_threshold ?? 500})`}
-                    className="font-mono text-xs"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label
-                  htmlFor="repo-egress-mode"
-                  className="font-medium text-foreground"
-                >
-                  Network Egress Mode
-                </label>
-                <Select
-                  value={overrideEgressMode}
-                  onValueChange={setOverrideEgressMode}
-                  disabled={!isAdmin}
-                >
-                  <SelectTrigger id="repo-egress-mode">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="inherit">
-                      Inherit org default (
-                      {orgDefaults?.network_egress_mode ?? "off_after_install"})
-                    </SelectItem>
-                    <SelectItem value="off_after_install">
-                      Off After Install
-                    </SelectItem>
-                    <SelectItem value="allowlist">Allowlist</SelectItem>
-                    <SelectItem value="unrestricted">Unrestricted</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {effectivePolicy && (
-                <div className="rounded-lg border border-border bg-secondary/40 p-3 space-y-1 text-[11px] font-mono">
-                  <div className="font-semibold text-foreground">
-                    Effective Merged Policy ({Object.keys(repoOverrides).length}{" "}
-                    overrides)
+              <TabsContent value="guardrails" className="pt-3">
+                {isDrawerLoading ? (
+                  <div className="py-8 flex items-center justify-center text-xs text-muted-foreground gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Loading effective guardrails...</span>
                   </div>
-                  <div className="text-muted-foreground">
-                    Branches: {effectivePolicy.protected_branches.join(", ")} ·
-                    Cap: $
-                    {(effectivePolicy.max_task_cost_cents / 100).toFixed(2)} ·
-                    Timeout: {effectivePolicy.timeout_minutes}m · Egress:{" "}
-                    {effectivePolicy.network_egress_mode}
-                  </div>
-                </div>
-              )}
+                ) : (
+                  <form
+                    onSubmit={handleSaveOverrides}
+                    className="space-y-4 text-xs"
+                  >
+                    <div className="space-y-1.5">
+                      <label
+                        htmlFor="repo-protected-branches"
+                        className="font-medium text-foreground"
+                      >
+                        Protected Branches Override
+                      </label>
+                      <Input
+                        id="repo-protected-branches"
+                        value={overrideBranches}
+                        onChange={(e) => setOverrideBranches(e.target.value)}
+                        disabled={!isAdmin}
+                        placeholder={`Inherit (${orgDefaults?.protected_branches.join(", ") ?? "main, master, release/*"})`}
+                        className="font-mono text-xs"
+                      />
+                    </div>
 
-              <DialogFooter className="gap-2 pt-2">
-                {isAdmin && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setOverrideBranches("");
-                      setOverrideMaxTaskCost("");
-                      setOverrideTimeout("");
-                      setOverrideMaxCycles("");
-                      setOverrideEgressMode("inherit");
-                      setOverrideLargeDiff("");
-                    }}
-                    className="gap-1.5"
-                  >
-                    <RotateCcw className="h-3.5 w-3.5" />
-                    <span>Clear Overrides</span>
-                  </Button>
-                )}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setDrawerOpen(false)}
-                >
-                  Close
-                </Button>
-                {isAdmin && (
-                  <Button
-                    type="submit"
-                    size="sm"
-                    disabled={isSavingOverride}
-                    className="gap-1.5"
-                  >
-                    {isSavingOverride && (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <label
+                          htmlFor="repo-max-task-cost"
+                          className="font-medium text-foreground"
+                        >
+                          Max Task Cost (Cents)
+                        </label>
+                        <Input
+                          id="repo-max-task-cost"
+                          type="number"
+                          min="1"
+                          value={overrideMaxTaskCost}
+                          onChange={(e) =>
+                            setOverrideMaxTaskCost(e.target.value)
+                          }
+                          disabled={!isAdmin}
+                          placeholder={`Inherit (${orgDefaults?.max_task_cost_cents ?? 500})`}
+                          className="font-mono text-xs"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label
+                          htmlFor="repo-timeout-minutes"
+                          className="font-medium text-foreground"
+                        >
+                          Timeout (Minutes)
+                        </label>
+                        <Input
+                          id="repo-timeout-minutes"
+                          type="number"
+                          min="1"
+                          max="60"
+                          value={overrideTimeout}
+                          onChange={(e) => setOverrideTimeout(e.target.value)}
+                          disabled={!isAdmin}
+                          placeholder={`Inherit (${orgDefaults?.timeout_minutes ?? 10})`}
+                          className="font-mono text-xs"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label
+                          htmlFor="repo-max-cycles"
+                          className="font-medium text-foreground"
+                        >
+                          Max Review Cycles
+                        </label>
+                        <Input
+                          id="repo-max-cycles"
+                          type="number"
+                          min="1"
+                          max="10"
+                          value={overrideMaxCycles}
+                          onChange={(e) => setOverrideMaxCycles(e.target.value)}
+                          disabled={!isAdmin}
+                          placeholder={`Inherit (${orgDefaults?.max_cycles ?? 3})`}
+                          className="font-mono text-xs"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label
+                          htmlFor="repo-large-diff"
+                          className="font-medium text-foreground"
+                        >
+                          Large Diff Threshold (Lines)
+                        </label>
+                        <Input
+                          id="repo-large-diff"
+                          type="number"
+                          min="1"
+                          value={overrideLargeDiff}
+                          onChange={(e) => setOverrideLargeDiff(e.target.value)}
+                          disabled={!isAdmin}
+                          placeholder={`Inherit (${orgDefaults?.large_diff_lines_threshold ?? 500})`}
+                          className="font-mono text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label
+                        htmlFor="repo-egress-mode"
+                        className="font-medium text-foreground"
+                      >
+                        Network Egress Mode
+                      </label>
+                      <Select
+                        value={overrideEgressMode}
+                        onValueChange={setOverrideEgressMode}
+                        disabled={!isAdmin}
+                      >
+                        <SelectTrigger id="repo-egress-mode">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="inherit">
+                            Inherit org default (
+                            {orgDefaults?.network_egress_mode ??
+                              "off_after_install"}
+                            )
+                          </SelectItem>
+                          <SelectItem value="off_after_install">
+                            Off After Install
+                          </SelectItem>
+                          <SelectItem value="allowlist">Allowlist</SelectItem>
+                          <SelectItem value="unrestricted">
+                            Unrestricted
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {effectivePolicy && (
+                      <div className="rounded-lg border border-border bg-secondary/40 p-3 space-y-1 text-[11px] font-mono">
+                        <div className="font-semibold text-foreground">
+                          Effective Merged Policy (
+                          {Object.keys(repoOverrides).length} overrides)
+                        </div>
+                        <div className="text-muted-foreground">
+                          Branches:{" "}
+                          {effectivePolicy.protected_branches.join(", ")} · Cap:
+                          $
+                          {(effectivePolicy.max_task_cost_cents / 100).toFixed(
+                            2
+                          )}{" "}
+                          · Timeout: {effectivePolicy.timeout_minutes}m ·
+                          Egress: {effectivePolicy.network_egress_mode}
+                        </div>
+                      </div>
                     )}
-                    <span>Save Overrides</span>
-                  </Button>
+
+                    <DialogFooter className="gap-2 pt-2">
+                      {isAdmin && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setOverrideBranches("");
+                            setOverrideMaxTaskCost("");
+                            setOverrideTimeout("");
+                            setOverrideMaxCycles("");
+                            setOverrideEgressMode("inherit");
+                            setOverrideLargeDiff("");
+                          }}
+                          className="gap-1.5"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                          <span>Clear Overrides</span>
+                        </Button>
+                      )}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setDrawerOpen(false)}
+                      >
+                        Close
+                      </Button>
+                      {isAdmin && (
+                        <Button
+                          type="submit"
+                          size="sm"
+                          disabled={isSavingOverride}
+                          className="gap-1.5"
+                        >
+                          {isSavingOverride && (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          )}
+                          <span>Save Overrides</span>
+                        </Button>
+                      )}
+                    </DialogFooter>
+                  </form>
                 )}
-              </DialogFooter>
-            </form>
+              </TabsContent>
+
+              <TabsContent value="rules" className="pt-3">
+                <RepoRulesAndOverridesTab
+                  repoId={selectedRepo.id}
+                  canLoadFromApi={canLoadFromApi}
+                  isAdmin={isAdmin}
+                  getToken={getToken}
+                />
+              </TabsContent>
+
+              <TabsContent value="examples" className="pt-3">
+                <RepoExamplePRsTab
+                  repoId={selectedRepo.id}
+                  canLoadFromApi={canLoadFromApi}
+                  isAdmin={isAdmin}
+                  getToken={getToken}
+                />
+              </TabsContent>
+
+              <TabsContent value="preferences" className="pt-3">
+                <RepoLearnedPreferencesTab
+                  repoId={selectedRepo.id}
+                  canLoadFromApi={canLoadFromApi}
+                  isAdmin={isAdmin}
+                  getToken={getToken}
+                />
+              </TabsContent>
+            </Tabs>
           )}
         </DialogContent>
       </Dialog>

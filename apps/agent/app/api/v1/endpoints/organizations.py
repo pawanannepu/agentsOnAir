@@ -1,9 +1,10 @@
 """Organization synchronization, guardrails, settings, and usage API endpoints."""
 
 import re
+import uuid
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
 from pydantic import ValidationError as PydanticValidationError
@@ -21,15 +22,28 @@ from app.application.schemas.guardrails import (
     NetworkEgressModeLiteral,
     RiskCategoryLiteral,
 )
+from app.application.schemas.review_rules import (
+    ReviewRuleCreateRequest,
+    ReviewRuleResponse,
+    ReviewRuleUpdateRequest,
+)
 from app.application.services.usage_tracker import UsageTracker
+from app.application.use_cases.review_rules import ReviewRulesUseCase
 from app.core.clerk_auth import ClerkUserContext
 from app.domain.entities.organization import Organization
+from app.domain.exceptions import NotFoundError, ValidationError
 from app.domain.services.policy_evaluator import PolicyEvaluator
 from app.infrastructure.db.repositories.audit_log_repository import (
     SqlAlchemyAuditLogRepository,
 )
 from app.infrastructure.db.repositories.organization_repository import (
     SqlAlchemyOrganizationRepository,
+)
+from app.infrastructure.db.repositories.repository_repository import (
+    SqlAlchemyRepositoryRepository,
+)
+from app.infrastructure.db.repositories.review_rules_repository import (
+    SqlAlchemyReviewRulesRepository,
 )
 from app.infrastructure.db.repositories.usage_repository import (
     SqlAlchemyUsageRepository,
@@ -192,3 +206,140 @@ async def update_organization_settings(
         id=str(updated_org.id),
         settings=updated_org.settings,
     )
+
+
+def _to_rule_response(rule) -> ReviewRuleResponse:
+    return ReviewRuleResponse(
+        id=rule.id,
+        org_id=rule.org_id,
+        repo_id=rule.repo_id,
+        title=rule.title,
+        instruction=rule.instruction,
+        severity=rule.severity,
+        category=rule.category,
+        path_globs=rule.path_globs,
+        is_enabled=rule.is_enabled,
+        created_by=rule.created_by,
+        created_at=rule.created_at,
+        updated_at=rule.updated_at,
+    )
+
+
+@router.get("/review-rules")
+async def list_organization_review_rules(
+    caller: Annotated[ClerkUserContext, Depends(get_current_clerk_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+):
+    """List active organization default review rules (any org member)."""
+    org = await resolve_caller_org(caller, db)
+    use_case = ReviewRulesUseCase(
+        rules_repo=SqlAlchemyReviewRulesRepository(db),
+        repository_repo=SqlAlchemyRepositoryRepository(db),
+        audit_log_repo=SqlAlchemyAuditLogRepository(db),
+    )
+    page = (offset // limit) + 1
+    rules, total = await use_case.list_org_rules(org.id, page=page, page_size=limit)
+    return {
+        "items": [_to_rule_response(r) for r in rules],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.post("/review-rules", response_model=ReviewRuleResponse, status_code=201)
+async def create_organization_review_rule(
+    payload: ReviewRuleCreateRequest,
+    auth_ctx: Annotated[
+        tuple[ClerkUserContext, Organization], Depends(require_org_admin)
+    ],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Create an organization default review rule (org:admin only)."""
+    caller, org = auth_ctx
+    use_case = ReviewRulesUseCase(
+        rules_repo=SqlAlchemyReviewRulesRepository(db),
+        repository_repo=SqlAlchemyRepositoryRepository(db),
+        audit_log_repo=SqlAlchemyAuditLogRepository(db),
+    )
+    try:
+        created = await use_case.create_org_rule(
+            org_id=org.id,
+            actor_id=caller.user_id,
+            title=payload.title,
+            instruction=payload.instruction,
+            severity=payload.severity,
+            category=payload.category,
+            path_globs=payload.path_globs,
+            is_enabled=payload.is_enabled,
+        )
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.message) from exc
+
+    await db.commit()
+    return _to_rule_response(created)
+
+
+@router.patch("/review-rules/{rule_id}", response_model=ReviewRuleResponse)
+async def update_organization_review_rule(
+    rule_id: uuid.UUID,
+    payload: ReviewRuleUpdateRequest,
+    auth_ctx: Annotated[
+        tuple[ClerkUserContext, Organization], Depends(require_org_admin)
+    ],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Update an organization default review rule (org:admin only)."""
+    caller, org = auth_ctx
+    use_case = ReviewRulesUseCase(
+        rules_repo=SqlAlchemyReviewRulesRepository(db),
+        repository_repo=SqlAlchemyRepositoryRepository(db),
+        audit_log_repo=SqlAlchemyAuditLogRepository(db),
+    )
+    try:
+        updated = await use_case.update_org_rule(
+            org_id=org.id,
+            rule_id=rule_id,
+            actor_id=caller.user_id,
+            title=payload.title,
+            instruction=payload.instruction,
+            severity=payload.severity,
+            category=payload.category,
+            path_globs=payload.path_globs,
+            is_enabled=payload.is_enabled,
+        )
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=exc.message) from exc
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.message) from exc
+
+    await db.commit()
+    return _to_rule_response(updated)
+
+
+@router.delete("/review-rules/{rule_id}", status_code=204)
+async def delete_organization_review_rule(
+    rule_id: uuid.UUID,
+    auth_ctx: Annotated[
+        tuple[ClerkUserContext, Organization], Depends(require_org_admin)
+    ],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Soft-delete an organization default review rule (org:admin only)."""
+    caller, org = auth_ctx
+    use_case = ReviewRulesUseCase(
+        rules_repo=SqlAlchemyReviewRulesRepository(db),
+        repository_repo=SqlAlchemyRepositoryRepository(db),
+        audit_log_repo=SqlAlchemyAuditLogRepository(db),
+    )
+    try:
+        await use_case.delete_org_rule(org.id, rule_id, caller.user_id)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=exc.message) from exc
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.message) from exc
+
+    await db.commit()
+    return Response(status_code=204)

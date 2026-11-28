@@ -123,6 +123,12 @@ class TaskRunModel(Base, TimestampMixin):
             "status",
             text("created_at DESC"),
         ),
+        Index(
+            "ix_task_runs_org_status_completed",
+            "org_id",
+            "status",
+            "completed_at",
+        ),
         Index("ix_task_runs_task_status", "task_id", "status"),
     )
 

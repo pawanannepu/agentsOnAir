@@ -9,12 +9,24 @@ from app.application.ports.github_gateway import GitHubGateway
 from app.application.ports.organization_repository import OrganizationRepository
 from app.application.ports.pr_review_repository import PRReviewRepository
 from app.application.ports.repository_repository import RepositoryRepository
+from app.application.ports.review_examples_repository import ReviewExamplesRepository
+from app.application.ports.review_feedback_repository import ReviewFeedbackRepository
+from app.application.ports.review_rules_repository import ReviewRulesRepository
 from app.application.ports.usage_repository import UsageRepository
 from app.application.services.context_budget_allocator import ContextBudgetAllocator
 from app.application.services.symbol_indexer import SymbolIndexer
 from app.application.services.usage_tracker import UsageTracker
 from app.domain.entities.pull_request_review import PullRequestReview
 from app.domain.services.policy_evaluator import PolicyEvaluator
+from app.infrastructure.db.repositories.review_examples_repository import (
+    SqlAlchemyReviewExamplesRepository,
+)
+from app.infrastructure.db.repositories.review_feedback_repository import (
+    SqlAlchemyReviewFeedbackRepository,
+)
+from app.infrastructure.db.repositories.review_rules_repository import (
+    SqlAlchemyReviewRulesRepository,
+)
 from app.infrastructure.github.review_publisher import GitHubReviewPublisher
 from app.infrastructure.llm.reviewer_node import CodeReviewAnalyzerNode
 
@@ -32,6 +44,9 @@ class RunPRReviewUseCase:
         review_publisher: GitHubReviewPublisher | None = None,
         organization_repo: OrganizationRepository | None = None,
         usage_repo: UsageRepository | None = None,
+        review_rules_repo: ReviewRulesRepository | None = None,
+        review_examples_repo: ReviewExamplesRepository | None = None,
+        review_feedback_repo: ReviewFeedbackRepository | None = None,
     ) -> None:
         self._pr_review_repo = pr_review_repo
         self._repository_repo = repository_repo
@@ -45,6 +60,26 @@ class RunPRReviewUseCase:
         self._usage_repo = usage_repo
         self._usage_tracker = (
             UsageTracker(usage_repo) if usage_repo is not None else None
+        )
+        session = getattr(pr_review_repo, "_session", None)
+        self._review_rules_repo: ReviewRulesRepository | None = review_rules_repo or (
+            SqlAlchemyReviewRulesRepository(session) if session is not None else None
+        )
+        self._review_examples_repo: ReviewExamplesRepository | None = (
+            review_examples_repo
+            or (
+                SqlAlchemyReviewExamplesRepository(session)
+                if session is not None
+                else None
+            )
+        )
+        self._review_feedback_repo: ReviewFeedbackRepository | None = (
+            review_feedback_repo
+            or (
+                SqlAlchemyReviewFeedbackRepository(session)
+                if session is not None
+                else None
+            )
         )
         self._policy_evaluator = PolicyEvaluator()
 
@@ -101,16 +136,39 @@ class RunPRReviewUseCase:
                 repo.full_name, review.pr_number, token
             )
 
-            # Build tree-sitter / ast symbol graph
             indexer = SymbolIndexer(repo_dir)
             symbol_graph = indexer.build_graph()
 
-            # Assemble context within 64k token budget
+            merged_rules = (
+                await self._review_rules_repo.list_repo_rules_with_overrides(
+                    org_id, repo.id
+                )
+                if self._review_rules_repo is not None
+                else []
+            )
+            learned_preferences = (
+                (
+                    await self._review_feedback_repo.list_preferences_for_repo(
+                        org_id, repo.id, page=1, page_size=200
+                    )
+                )[0]
+                if self._review_feedback_repo is not None
+                else []
+            )
+            example_prs = (
+                await self._review_examples_repo.list_by_repo(org_id, repo.id)
+                if self._review_examples_repo is not None
+                else []
+            )
+
             assembled = ContextBudgetAllocator.assemble_context(
                 diff_text=diff_text,
                 symbol_graph=symbol_graph,
                 repo_dir=repo_dir,
                 ignored_patterns=repo.review_settings.get("ignored_paths"),
+                custom_rules=merged_rules,
+                learned_preferences=learned_preferences,
+                example_prs=example_prs,
             )
 
             # 2. Sub-state: reviewing (invoke reviewer node)
@@ -120,12 +178,18 @@ class RunPRReviewUseCase:
                 context_token_count=assembled.total_token_count,
             )
 
+            active_rule_ids = {uuid.UUID(rid) for rid in assembled.included_rule_ids}
             analysis = await self._reviewer_node.analyze(
                 tier1_diff_context=assembled.tier1_content,
                 tier2_symbol_context=assembled.tier2_content,
                 omitted_files=assembled.omitted_files,
                 allow_approval=repo.review_settings.get("allow_approval", False),
                 simulated_findings=simulated_findings,
+                active_rule_ids=active_rule_ids if merged_rules else set(),
+                dampened_patterns=set(assembled.dampened_patterns),
+                suppressed_patterns=set(assembled.suppressed_patterns),
+                min_severity=str(repo.review_settings.get("min_severity", "info")),
+                max_comments=int(repo.review_settings.get("max_comments", 25)),
             )
 
             if self._usage_tracker is not None:
@@ -141,12 +205,19 @@ class RunPRReviewUseCase:
                     pr_review_id=review_id,
                 )
 
-            # Store findings
+            # Store findings and attach persisted IDs for comment backfill
+            publish_findings: list[dict] = []
             if analysis.findings:
-                await self._pr_review_repo.add_findings(
+                persisted_findings = await self._pr_review_repo.add_findings(
                     review_id=review_id,
                     findings=analysis.findings,
                 )
+                for raw_f, persisted_f in zip(
+                    analysis.findings, persisted_findings, strict=False
+                ):
+                    enriched = dict(raw_f)
+                    enriched["id"] = persisted_f.id
+                    publish_findings.append(enriched)
 
             # 3. Sub-state: posting (publish review to GitHub)
             await self._pr_review_repo.update_status(
@@ -165,9 +236,10 @@ class RunPRReviewUseCase:
                 head_commit_sha=review.head_commit_sha,
                 verdict=analysis.verdict,
                 summary=analysis.summary,
-                findings=analysis.findings,
+                findings=publish_findings,
                 diff_text=diff_text,
                 token=write_token,
+                pr_review_repo=self._pr_review_repo,
             )
 
             duration_ms = int((time.time() - start_time) * 1000)
