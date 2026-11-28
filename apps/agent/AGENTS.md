@@ -35,6 +35,7 @@ pnpm --filter agent lint
 - Use native async coroutines for all I/O, database access, and HTTP calls.
 - Define request and response contracts with typed Pydantic models.
 - Validate all environment variables during startup in `app/core/config.py`.
+- Sanitize user authored review context (rules, examples, feedback) with `app/core/redaction.py` and bound Tier 1 prompt context via `tiktoken` in `ContextBudgetAllocator`.
 
 ## Gotchas
 
@@ -49,5 +50,6 @@ pnpm --filter agent lint
 
 - [0001 Stack and architecture](../../docs/specs/0001-stack-and-architecture/index.md)
 - [0005 Full repository context code reviewer](../../docs/specs/0005-full-repository-context-code-reviewer/index.md)
+- [0009 Custom review rules and feedback learning](../../docs/specs/0009-custom-review-rules-and-feedback-learning/index.md)
 
 _Drafted by /audit from the repo, worth a quick human pass. Edit freely: once a line stops matching this draft, later runs treat it as curated and will flag rather than overwrite it._

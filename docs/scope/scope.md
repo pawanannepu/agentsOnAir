@@ -20,7 +20,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 6 | Full repository context code reviewer | Slice 2 | in-progress |
 | 7 | Live task streaming & interactive collaboration | Slice 3 | in-progress |
 | 8 | Guardrails, branch protection & budget limits | Slice 4 | in-progress |
-| 9 | Custom review rules & feedback learning | Slice 5 | in-progress |
+| 9 | Custom review rules & feedback learning | Slice 5 | done |
 
 ## Foundations
 

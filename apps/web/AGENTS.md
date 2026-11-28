@@ -24,6 +24,9 @@ Web console user interface for agentsOnAir built with Next.js App Router and Tai
 | `src/components/layout/` | Console application shell with collapsible sidebar, dynamic breadcrumbs, and layout persistence |
 | `src/components/ui/` | Accessible UI component library based on Radix UI, CVA, and virtualized TerminalViewer |
 | `src/app/tasks/` | Task monitoring views with status filtering and split pane execution inspector |
+| `src/app/(console)/reviews/` | Organization pull request reviews list, findings inspector, and feedback controls |
+| `src/app/(console)/analytics/` | Quality, turnaround, rule trigger, and AI cost analytics dashboard |
+| `src/lib/review-api.ts` | Client fetch wrapper and DTO contracts for agent review, rule, and analytics APIs |
 | `tests/page.test.tsx` | Front end component tests using React Testing Library and Vitest |
 
 ## Commands
@@ -66,5 +69,6 @@ pnpm --filter web lint
 
 - [0001 Stack and architecture](../../docs/specs/0001-stack-and-architecture/index.md)
 - [0003 Design system and console UI foundation](../../docs/specs/0003-design-system-and-console-ui/index.md)
+- [0009 Custom review rules and feedback learning](../../docs/specs/0009-custom-review-rules-and-feedback-learning/index.md)
 
 _Drafted by /audit from the repo, worth a quick human pass. Edit freely: once a line stops matching this draft, later runs treat it as curated and will flag rather than overwrite it._
